@@ -1,0 +1,15 @@
+{
+  "name": "@socrate/service",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meyer0x/socrate.git",
+    "directory": "apps/service"
+  },
+  "type": "module",
+  "dependencies": {
+    "@socrate/contract": "0.1.0"
+  }
+}

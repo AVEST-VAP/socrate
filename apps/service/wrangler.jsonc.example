@@ -1,0 +1,35 @@
+// Copy to apps/service/wrangler.jsonc (ignored by Git), replace every <…> value, then run `npm run distant -- preparer`.
+// Comments must sit on their own line and trailing commas are not allowed. `preparer` adds main, no_bundle, assets and the computed
+// variables (SOCRATE_SCHEMA, build of SOCRATE_INSTANCE), then writes apps/service/dist/wrangler.json, the only configuration given to wrangler.
+// No cron: purge and cleanup stay manual (docs/operations.md).
+{
+  "name": "my-socrate",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": true,
+  "d1_databases": [
+    { "binding": "DB", "database_name": "<D1 database name>", "database_id": "<D1 database id>" }
+  ],
+  "r2_buckets": [
+    // Add "jurisdiction": "eu" if the bucket was created in the EU jurisdiction.
+    { "binding": "CAPTURES", "bucket_name": "<R2 bucket name>" }
+  ],
+  "vars": {
+    "SOCRATE_INSTANCE": { "instanceId": "previews" },
+    "SOCRATE_CONFIG": {
+      "audience": "socrate",
+      "assertionMaxAgeSeconds": 60,
+      "clockSkewSeconds": 30,
+      "sessionTtlSeconds": 300,
+      "archiveRetentionDays": 30,
+      "projects": {
+        "my-app": {
+          // Exact `iss` of the assertions signed by your backend.
+          "issuer": "my-backend",
+          "publicJwk": "<ES256 public key as a JWK object { kty, crv, x, y }>",
+          "attestableCapabilities": ["thread.participate", "thread.moderate"],
+          "allowedOrigin": "https://*.my-app-previews.pages.dev"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "id": "rappel-sms",
+    "key": "rdv.rappel.sms",
+    "locale": "fr",
+    "variant": "Canal SMS",
+    "source": "Un rappel vous sera envoyé par SMS {delai} avant le rendez-vous.",
+    "examples": ["Un rappel vous sera envoyé par SMS 24 heures avant le rendez-vous."],
+    "question": "Le client comprend-il qu’il recevra un SMS et à quel moment ?",
+    "zone": "fiche-rendez-vous",
+    "context": "Fiche du rendez-vous, sous l’horaire, quand le cabinet envoie ses rappels par SMS."
+  },
+  {
+    "id": "rappel-email",
+    "key": "rdv.rappel.email",
+    "locale": "fr",
+    "variant": "Canal e-mail",
+    "source": "Un rappel vous sera envoyé par e-mail {delai} avant le rendez-vous.",
+    "examples": ["Un rappel vous sera envoyé par e-mail 24 heures avant le rendez-vous."],
+    "question": "La formulation proche de la variante SMS est-elle assez distincte pour éviter une confusion de canal ?",
+    "zone": "fiche-rendez-vous",
+    "context": "Même emplacement, quand le cabinet envoie ses rappels par e-mail."
+  }
+]

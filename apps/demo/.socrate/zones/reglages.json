@@ -1,0 +1,30 @@
+{
+  "id": "reglages-rappels",
+  "title": "Réglages des rappels",
+  "route": "/reglages/rappels",
+  "instructions": "Ouvrir les réglages, la section Rappels, puis « Modèle détaillé » pour voir le bouton Enregistrer le rappel.",
+  "questions": [
+    "Le délai par défaut de 24 heures vous semble-t-il juste ?",
+    "Le libellé « Rappel automatique » est-il compréhensible ?"
+  ],
+  "target": {
+    "id": "modal-enregistrer"
+  },
+  "source": "apps/demo/src/main.tsx, composant Settings",
+  "markers": [
+    {
+      "kind": "new",
+      "target": {
+        "id": "rappel-delai"
+      },
+      "explanation": "Nouveau réglage : chaque cabinet choisit son délai de rappel."
+    },
+    {
+      "kind": "review",
+      "target": {
+        "id": "rappel-libelle"
+      },
+      "explanation": "Avis demandé sur le libellé vu par le client."
+    }
+  ]
+}

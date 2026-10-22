@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "reviewKey": "rappels-automatiques",
+  "repository": "exemple/agenda-demo",
+  "pullRequest": 42,
+  "title": "Rappels automatiques des rendez-vous",
+  "before": "Les rappels étaient envoyés à la main par l’équipe, la veille, sans réglage par cabinet.",
+  "now": "Chaque cabinet règle son délai de rappel. Un rendez-vous modifié recalcule son rappel et l’indique dans sa fiche.",
+  "zones": [
+    "zones/reglages.json",
+    "zones/rendez-vous.json"
+  ],
+  "wordings": "wordings.json"
+}

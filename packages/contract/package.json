@@ -1,0 +1,21 @@
+{
+  "name": "@socrate/contract",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meyer0x/socrate.git",
+    "directory": "packages/contract"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./assemble": "./src/assemble.ts",
+    "./backup": "./src/backup.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

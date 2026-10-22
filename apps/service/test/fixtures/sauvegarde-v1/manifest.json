@@ -1,0 +1,129 @@
+{
+ "format": "socrate-sauvegarde/1",
+ "createdAt": "2026-10-19T15:09:34.944Z",
+ "sourceInstanceId": "a576246b-36e7-4cda-864d-b0d5869609ff",
+ "build": "0e0144ea759156f2307b4a6939279f716d9a4f2040c80aac221553deb7db4ce2",
+ "retention": "Conservée jusqu’à suppression manuelle explicite de ce dossier, sans expiration automatique. Une purge de l’instance active ne modifie ni ne supprime une sauvegarde déjà faite.",
+ "schema": [
+  {
+   "id": "0001_pilot.sql",
+   "checksum": "f3fecc3e8f1a073514e31fefb33d4385ea2d83bc627f3c13e69d0603e6c3e923"
+  },
+  {
+   "id": "0002_capture.sql",
+   "checksum": "7881d40ac711d62f1ea6feffb95c0013091cfb98aae4f47f910d35eed0bf1b64"
+  },
+  {
+   "id": "0003_revocation.sql",
+   "checksum": "e6ae53057485dedd318659b107251122aa43082eb55df1d5fdeeca0dc98e7688"
+  },
+  {
+   "id": "0004_wording.sql",
+   "checksum": "01c1b401709616d17b19b6a8f3868743e70bda4636d943fce18867c0103d84c0"
+  },
+  {
+   "id": "0005_agent_api.sql",
+   "checksum": "936b2fca7026ba9b7a776bfb33d6265c8138b7e9afe7d23195d204f9c7ebd3be"
+  },
+  {
+   "id": "0006_operations.sql",
+   "checksum": "10f2c5a04d12f041c83ecef1b87d1374400b4a934bd91c59b14a4b0406abc0ba"
+  }
+ ],
+ "epochAtBackup": "7eeba6a6327a8aff39f8548e8e97cc69",
+ "frozenSince": "2026-10-19T15:09:34.832Z",
+ "tables": [
+  {
+   "name": "reviews",
+   "file": "tables/reviews.json",
+   "rows": 1,
+   "sha256": "b164fcccbc5aa8ec19470a16b2709b7b9e782c47127cf9e465c080fc531dbc2e"
+  },
+  {
+   "name": "revisions",
+   "file": "tables/revisions.json",
+   "rows": 1,
+   "sha256": "28d7f20cbb5fcdcc6efcd0c2d69d493cc2f8549988ffa7a2e0636ed1f2fd9f8f"
+  },
+  {
+   "name": "deployments",
+   "file": "tables/deployments.json",
+   "rows": 1,
+   "sha256": "560a8aa33293208708c3b784deaa56207b1153f8344bdae3600746448d2f68b7"
+  },
+  {
+   "name": "threads",
+   "file": "tables/threads.json",
+   "rows": 2,
+   "sha256": "afeca5a33f5526609da975ed3fd18bf80dcbcc4f52df6ce5f50723cd517570b8"
+  },
+  {
+   "name": "messages",
+   "file": "tables/messages.json",
+   "rows": 3,
+   "sha256": "84da3023fba559882d75f9155b8c3c9aec498c5afcebf0bed081a9a0efc8281b"
+  },
+  {
+   "name": "captures",
+   "file": "tables/captures.json",
+   "rows": 1,
+   "sha256": "8ba8e48c4db82b5284ecfb6e8c3ff423460e7281dbcc2f7505939b532d9bfc08"
+  },
+  {
+   "name": "targets",
+   "file": "tables/targets.json",
+   "rows": 1,
+   "sha256": "8387d8c8c0e7a96380e3f1fa5c0f6d5a22df2f4d539988ecef12a19a7275c02f"
+  },
+  {
+   "name": "proposals",
+   "file": "tables/proposals.json",
+   "rows": 0,
+   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+   "name": "operations",
+   "file": "tables/operations.json",
+   "rows": 3,
+   "sha256": "ef2f18f72d5e28ba202ce42a910083df28caab6b27a6a086594d14881ca282cb"
+  },
+  {
+   "name": "changes",
+   "file": "tables/changes.json",
+   "rows": 3,
+   "sha256": "b61506b257fe82564822b67f202b32d3184a20ce53b309fb1f7f20a5b90c173d"
+  },
+  {
+   "name": "consumed_assertions",
+   "file": "tables/consumed_assertions.json",
+   "rows": 1,
+   "sha256": "52ee1b6b8d7cc3983ecf06407afb1cdeb6b9f3ccc5c601fe38ee7a23327e530a"
+  },
+  {
+   "name": "purge_log",
+   "file": "tables/purge_log.json",
+   "rows": 0,
+   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+ ],
+ "objects": [
+  {
+   "key": "captures/demo/rappels-automatiques/a968c3b7-f37a-43ee-96f3-2cd31f5acfe9.png",
+   "file": "objects/53f5e2efd2611aa9d2ab5de45864c42f51229720540ebc78cba04d67f94896e4.png",
+   "size": 1008,
+   "sha256": "53f5e2efd2611aa9d2ab5de45864c42f51229720540ebc78cba04d67f94896e4",
+   "captureId": "a968c3b7-f37a-43ee-96f3-2cd31f5acfe9"
+  }
+ ],
+ "notExported": {
+  "sessions": "révoquées par construction : aucune session ne survit à la restauration",
+  "technical_credentials": "révoqués par construction : la restauration émet de nouveaux accès locaux",
+  "listings": "listes figées temporaires, invalidées par la nouvelle epoch",
+  "listing_items": "listes figées temporaires",
+  "sync_epoch": "renouvelée à la restauration : curseurs et marqueurs antérieurs en 410",
+  "purge_objects": "vide : aucune sauvegarde pendant une purge inachevée",
+  "maintenance": "état du gel propre à l’instance",
+  "restorations": "propre à chaque instance"
+ },
+ "objectsNotExported": []
+}

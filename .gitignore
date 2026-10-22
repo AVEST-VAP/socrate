@@ -1,0 +1,17 @@
+node_modules/
+.worktrees/
+.local/
+.tmp/
+.wrangler/
+dist/
+coverage/
+test-results/
+playwright-report/
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+!.env.example
+!.dev.vars.example
+.DS_Store
+apps/service/wrangler.jsonc

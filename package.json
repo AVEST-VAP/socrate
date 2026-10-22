@@ -1,0 +1,41 @@
+{
+  "name": "socrate",
+  "description": "In-preview product review for web apps: contextual feedback from reviewers, read back by coding agents.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meyer0x/socrate.git"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/contract",
+    "packages/react",
+    "apps/service",
+    "apps/demo",
+    "tools/local"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/service/tsconfig.json --noEmit",
+    "build:worker": "node tools/local/build-worker.ts",
+    "test:contract": "npm run build:worker && node --test --test-concurrency=1 apps/service/test/*.test.ts packages/contract/test/*.test.ts tools/local/test/*.test.ts",
+    "demo": "node tools/local/demo.ts",
+    "nettoyer-captures": "node tools/local/nettoyer-captures.ts",
+    "sauvegarde": "node tools/local/sauvegarde.ts",
+    "parcours-local": "node tools/local/parcours-local.ts",
+    "test:browser": "node --test --test-concurrency=1 tools/local/browser-tests.ts tools/local/commentaires-tests.ts tools/local/mount-tests.ts",
+    "verify": "npm run typecheck && npm run test:contract && npm run test:browser",
+    "measure:demo": "node tools/local/measure-demo.ts",
+    "distant": "node tools/local/distant.ts",
+    "assemble": "node tools/local/assemble.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261015.1",
+    "@types/node": "25.0.0",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "typescript": "5.9.3"
+  }
+}

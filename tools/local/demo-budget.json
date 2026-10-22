@@ -1,0 +1,14 @@
+{
+  "statut": "Regression ceilings for the local demo, checked by npm run measure:demo. They are never raised automatically: raising one is a reviewed change to this file. Deterministic demo scenario. Units: gzip (zlib level 9) of built files; decoded HTTP body bytes counted at the test browser transport over loopback, neither real compressed transfer nor a speed claim. entreeDeltaGzip: entry chunk growth over the witness build. bootstrapGzip: dynamic bootstrap chunk. panneauGzip: frame root chunk (toolbar, list, bubble, pins, correction, client, styles) plus its unique static imports not already loaded by entry or bootstrap. arriveeOuvertureOctets: total bytes from signed-in arrival to the open list, compared separately for the empty default, populated default and explicit editorial openings. ouvertureOctetsServis: bytes served by opening the list after arrival, same three openings. guideGzip and reperesOctetsServis: the guidance chunk in two units. captureGzip and captureOctetsServis: extra bytes between markers off and capture active, including the in-page replacement editor, without publishing images.",
+  "limites": {
+    "entreeDeltaGzip": 1024,
+    "bootstrapGzip": 2048,
+    "panneauGzip": 30208,
+    "arriveeOuvertureOctets": 130048,
+    "ouvertureOctetsServis": 8192,
+    "guideGzip": 3072,
+    "captureGzip": 5632,
+    "reperesOctetsServis": 6656,
+    "captureOctetsServis": 22528
+  }
+}

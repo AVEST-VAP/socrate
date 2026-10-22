@@ -1,0 +1,13 @@
+{
+  "id": "fiche-rendez-vous",
+  "title": "Modification d’un rendez-vous",
+  "route": "/rendez-vous/rdv-1042",
+  "instructions": "Modifier l’heure du rendez-vous et observer la mention de rappel.",
+  "questions": ["La mention « Rappel recalculé » doit-elle apparaître avant ou après l’enregistrement ?"],
+  "target": { "id": "fiche-rendez-vous" },
+  "source": "apps/demo/src/main.tsx, composant Application",
+  "markers": [
+    { "kind": "changed", "target": { "id": "rappel-mention" }, "explanation": "La mention de rappel est recalculée après chaque modification d’heure." },
+    { "kind": "changed", "target": { "id": "ligne-rendez-vous", "instance": "rdv-1042" }, "explanation": "Ce rendez-vous porte désormais un rappel automatique." }
+  ]
+}

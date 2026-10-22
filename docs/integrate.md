@@ -1,0 +1,147 @@
+# Integrate Socrate into your app
+
+An integration has three pieces: an identity bridge in your backend, the client in preview builds, and a CI step. The demo app in `apps/demo` implements all three with fictional data; each section points to the relevant file.
+
+Throughout this guide, `my-app` is the project id, `my-backend` the issuer of your assertions, and `https://*.my-app-previews.pages.dev` the pattern of your preview URLs.
+
+## 1. Identity bridge
+
+Add an authenticated route to your backend, for example `POST /api/socrate/assertion`. It checks your own session, then returns `{ "assertion": "<jwt>" }`.
+
+The assertion is a compact JWT signed with **ES256** (ECDSA P-256, SHA-256), valid for at most **60 seconds**. Every claim is checked:
+
+| Claim | Meaning |
+| --- | --- |
+| `iss` | The issuer configured for the project, e.g. `my-backend`. |
+| `aud` | `socrate` (the `audience` of the service configuration). |
+| `sub` | Stable id of the real user in your app. The Socrate actor is `iss:sub`. |
+| `name` | Display name shown as the author. |
+| `iat`, `exp` | Validity window, at most 60 seconds; clock skew tolerance is configurable up to 60 seconds. |
+| `jti` | Unique id, consumed once. |
+| `projectId`, `reviewKey`, `deploymentId` | Session scope. The deployment must be registered and not revoked. |
+| `origin` | Exact origin of the preview, equal to the request `Origin` and to the registered origin of the deployment. |
+| `capabilities` | Subset of `thread.participate` and `thread.moderate`. Request `thread.moderate` only for developers. |
+| `exploring` | `null`, or `{ account, organisation }` when the user impersonates a customer account. Put the real user in `sub` and `name`, never the impersonated one. |
+
+A minimal Node signer is `tools/local/assertion.ts` (`signAssertion`). The demo's fake backend is the Vite plugin in `apps/demo/vite.config.ts`. Generate the key pair once:
+
+```sh
+node --input-type=module -e "const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']); console.log(JSON.stringify({ private: await crypto.subtle.exportKey('jwk', k.privateKey), public: await crypto.subtle.exportKey('jwk', k.publicKey) }))"
+```
+
+The private JWK stays in your backend's secret store. The public JWK goes in the service configuration.
+
+Refusals: a replayed assertion gets `401 assertion_replayed`; a malformed one `401 assertion_invalid`. When a response is lost, the client asks your backend for a new assertion; it never reuses one.
+
+## 2. The client, in preview builds only
+
+The client takes three inputs:
+
+- `preview`: `{ serviceUrl, projectId, reviewKey, deploymentId }`, injected at build time or served by your backend;
+- `getIdentityAssertion(signal)`: calls your route from step 1 and returns the JWT string; `signal` is aborted when the client unmounts;
+- `navigation`: `{ current(): string, go(route: string): void }`, wired to your router. Socrate uses it to know which screen a comment belongs to and to open the page of a thread.
+
+### Option A: the module served by your instance (no npm package)
+
+Your Socrate Worker serves a self-contained build of the client, React included. `GET /v1/client` returns `{ "url": "https://<worker>/client/<hash>.js" }`. Read it once per preview build (or at runtime) and import it:
+
+```js
+const { url } = await (await fetch(`${SOCRATE_URL}/v1/client`)).json();
+const { mount } = await import(/* @vite-ignore */ url);
+const unmount = mount(document.getElementById('socrate'), {
+  preview: { serviceUrl: SOCRATE_URL, projectId: 'my-app', reviewKey: 'my-app-pr-42', deploymentId: 'my-app-pr-42-build-7' },
+  getIdentityAssertion: async (signal) => (await (await fetch('/api/socrate/assertion', { method: 'POST', signal })).json()).assertion,
+  navigation: { current: () => location.pathname, go: (route) => history.pushState(null, '', route) },
+});
+```
+
+The client files are immutable and served with `Access-Control-Allow-Origin` only to registered, non-revoked deployment origins: a page from another origin cannot import them. When the signed-in user changes without a page reload, call `unmount()` and `mount()` again. `tools/local/fixtures/mount-host.ts` is a host page without React that does exactly this.
+
+### Option B: the React component
+
+If your app uses React 19, render `SocrateReview` from `packages/react` (vendored or as a workspace dependency; the packages are not on npm yet):
+
+```tsx
+const SocrateReview = lazy(() => import('@socrate/react').then((m) => ({ default: m.SocrateReview })));
+
+{__SOCRATE_PREVIEW__ && user && (
+  <Suspense fallback={null}>
+    <SocrateReview key={`${user.id}:${user.exploring?.account ?? ''}`} preview={preview} getIdentityAssertion={getIdentityAssertion} navigation={navigation} />
+  </Suspense>
+)}
+```
+
+The `key` remounts the client when the user or the impersonated account changes in the same tab. See `apps/demo/src/socrate.tsx`.
+
+### Keep it out of production
+
+Socrate must only ship in preview builds. The demo reads `SOCRATE_PREVIEW_BUILD` (`true`, `false` or unset; any other value fails the build) and exposes it as `__SOCRATE_PREVIEW__`. Behind that flag, the dynamic import, the styles, the manifest and the `data-socrate-*` attributes disappear from production bundles. `npm run measure:demo` checks this on the module graph of the demo build.
+
+### Optional attributes
+
+- `data-socrate-id="<id>"` on an element lets the manifest point zones and markers at it.
+- `data-socrate-wording="<wording-id>"` on the element that displays exactly one prepared wording attaches proposals made on it to that wording. Never put it on a container that displays several texts.
+
+## 3. CI
+
+Configure the project in the service (see [self-host-cloudflare.md](self-host-cloudflare.md)), then issue two technical tokens, each limited to the project:
+
+- **`deployment.import`**, stored as a CI secret (`SOCRATE_IMPORT_TOKEN` below). For each preview deployment, CI assembles the `.socrate/` folder of the pull request and registers the deployment.
+- **`review.archive`**, kept out of CI: `POST /v1/projects/my-app/reviews/my-app-pr-42/archive` when the work is done. See [operations.md](operations.md).
+
+The packages are not published on npm, so the CI job uses a clone of this repository (`npm ci` once) in `$SOCRATE_DIR`. From the root of your app's checkout, with `jq` and `curl`:
+
+```sh
+npm --prefix "$SOCRATE_DIR" run --silent assemble -- .socrate > manifest.json
+REVIEW=$(jq -r .reviewKey manifest.json)
+jq -n --arg commit "$COMMIT_SHA" --arg buildId "$BUILD_ID" --arg url "$PREVIEW_URL" --slurpfile manifest manifest.json \
+  '{ commit: $commit, buildId: $buildId, url: $url, manifest: $manifest[0] }' > deployment.json
+curl -q -sS --fail-with-body -X PUT -H @- -H 'Content-Type: application/json' \
+  "$SOCRATE_URL/v1/projects/my-app/reviews/$REVIEW/deployments/$REVIEW-build-$BUILD_ID" \
+  --data @deployment.json <<EOF
+Authorization: Bearer $SOCRATE_IMPORT_TOKEN
+EOF
+```
+
+`npm run --silent assemble -- <dir>` resolves a relative `<dir>` from the directory it is called from, writes the manifest to standard output and nothing else, and on a refusal exits with code 1, printing each faulty file and data path to standard error. `COMMIT_SHA` is the hexadecimal commit (7 to 64 characters), `BUILD_ID` the id of the build (at most 64 characters), `PREVIEW_URL` the URL of the preview, inside `allowedOrigin`. The review in the route must be the `reviewKey` of the manifest, otherwise `422 invalid_manifest`. The import is idempotent: replaying the same body converges, and the same deployment id with a different body is refused with `409 immutable_deployment`. An URL outside `allowedOrigin` is refused with `403`.
+
+`POST …/deployments/{id}/revoke` with the import token revokes a preview: reviewer sessions end, data stays readable.
+
+## The `.socrate/` manifest
+
+Every import carries a manifest, which explains the review to reviewers. It is required: an import without it, or without a title, a before/now summary and at least one zone, is refused with `422 invalid_manifest`. The smallest valid folder has two files.
+
+<!-- manifest: .socrate/index.json -->
+```json
+{
+  "schemaVersion": 1,
+  "reviewKey": "my-app-pr-42",
+  "title": "Automatic appointment reminders",
+  "before": "Reminders were sent by hand the day before.",
+  "now": "Each office sets its reminder delay.",
+  "zones": ["zones/settings.json"]
+}
+```
+
+<!-- manifest: .socrate/zones/settings.json -->
+```json
+{
+  "id": "reminder-settings",
+  "title": "Reminder settings",
+  "route": "/settings/reminders"
+}
+```
+
+`tools/local/test/assemble.test.ts` assembles this exact example and checks that each of `title`, `before`, `now` and `zones` is required.
+
+Optional fields of `index.json`: `repository` (for example `my-org/my-app`), `pullRequest` (a positive number) and `wordings` (the path of a wordings file). A zone file (`zones/*.json`) has a required `id`, `title` and `route`, then optional `instructions`, `questions`, `target` (`{ "id": "<data-socrate-id>" }`), an indicative `source` and `markers` (`{ "kind": "new" | "changed" | "review", "target": { "id": "…" }, "explanation": "…" }`). The wordings file is an array of at most 100 prepared texts: `id`, optional `key` (translation key), `locale`, optional `variant`, `source` (with interpolations), optional `examples`, `question`, optional `zone` and `context`. An empty selection of wordings is normal.
+
+The assembler refuses missing or unreferenced files, unknown fields, path traversal, symbolic links leaving the folder, remote references and executable code, and reports errors with the file and the data path. The schemas are in `packages/contract/src/manifest.ts`; `apps/demo/.socrate/` is a complete example.
+
+When preparing wordings, select only the texts that deserve a human product decision: a functional promise, a business term, a consequence that is irreversible or visible to a third party, or an ambiguity. Socrate never inventories the app's texts. Removing `.socrate/` at the end of the work erases nothing: imported revisions stay readable through `GET …/revisions/{revisionId}`.
+
+The editorial surfaces that display zones, markers and the grouped wording review are hidden by default in the current UI and can be enabled with the `editorial` prop. Comments, pins, conversations and wording proposals from the page work without them.
+
+## Origin policy
+
+Each project of a deployed instance must declare `allowedOrigin`, either an exact origin (`https://preview.example.com`) or a single-label wildcard (`https://*.my-app-previews.pages.dev`). The wildcard stands for exactly one DNS label; scheme and port must be those of the pattern: `https://a.my-app-previews.pages.dev` matches, `https://a.b.my-app-previews.pages.dev`, `http://…`, `…:8443` and `…pages.dev.evil.com` do not. A deployment URL outside the pattern is refused at import, so no session, CORS header or client module can ever be obtained for it. `npm run distant -- preparer` refuses a project without `allowedOrigin`.

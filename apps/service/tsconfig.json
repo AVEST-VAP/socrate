@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "@cloudflare/workers-types"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../packages/contract/src/index.ts",
+    "../../packages/contract/src/api.ts",
+    "../../packages/contract/src/manifest.ts",
+    "../../packages/contract/src/canonical.ts"
+  ],
+  "exclude": []
+}

@@ -1,0 +1,33 @@
+name: preview-budget
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  mesure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TMPDIR: ${{ github.workspace }}/.tmp/tmp
+      TMP: ${{ github.workspace }}/.tmp/tmp
+      TEMP: ${{ github.workspace }}/.tmp/tmp
+      npm_config_cache: ${{ github.workspace }}/.local/npm-cache
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.local/pw-browsers
+      NODE_COMPILE_CACHE: ${{ github.workspace }}/.local/node-compile-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25.9.0
+      - name: Dépendances
+        run: |
+          mkdir -p .tmp/tmp .local/pw-browsers .local/npm-cache .local/node-compile-cache
+          npm ci
+          npx playwright install chromium
+      - name: Exclusion hors preview, mesure et budget
+        run: npm run typecheck && npm run measure:demo

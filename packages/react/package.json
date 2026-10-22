@@ -1,0 +1,23 @@
+{
+  "name": "@socrate/react",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meyer0x/socrate.git",
+    "directory": "packages/react"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@socrate/contract": "0.1.0",
+    "mediabunny": "1.62.0"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  }
+}
