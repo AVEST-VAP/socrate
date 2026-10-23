@@ -60,6 +60,7 @@ npm run demo
 - `npm run demo -- --reset` starts again from empty storage.
 - `SOCRATE_SERVICE_PORT`, `SOCRATE_DEMO_PORT` and `SOCRATE_INSTANCE` change the ports and the instance name.
 - `npm run parcours-local -- --reset` runs the whole stack once in the foreground: it publishes a fictional comment, reads it back with the agent token, and stops.
+- `npm run serve -- --origin <your app> --manifest <.socrate folder>` runs only the service, for your own app's dev server: see [Try Socrate against your own app locally](docs/integrate.md#try-socrate-against-your-own-app-locally).
 
 The demo data is fictional. The demo reaches no external service: the Worker's outbound traffic is refused.
 

@@ -49,7 +49,7 @@ test('contrôle structurel : bibliothèques et routes navigateur seulement derri
   const scripts = (JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> }).scripts;
   for (const [name, command] of Object.entries(scripts)) {
     if (name === 'typecheck' || name === 'verify') continue;
-    assert.match(command, /^(npm run build:worker && )?node (--test --test-concurrency=1 )?(tools\/local\/(build-worker|demo|nettoyer-captures|sauvegarde|parcours-local|browser-tests|measure-demo|distant|assemble)\.ts|apps\/service\/test\/\*\.test\.ts packages\/contract\/test\/\*\.test\.ts tools\/local\/test\/\*\.test\.ts)/, `entrée npm ${name} hors des entrées sous frontière : ${command}`);
+    assert.match(command, /^(npm run build:worker && )?node (--test --test-concurrency=1 )?(tools\/local\/(build-worker|demo|nettoyer-captures|sauvegarde|parcours-local|browser-tests|measure-demo|distant|assemble|serve)\.ts|apps\/service\/test\/\*\.test\.ts packages\/contract\/test\/\*\.test\.ts tools\/local\/test\/\*\.test\.ts)/, `entrée npm ${name} hors des entrées sous frontière : ${command}`);
   }
 });
 

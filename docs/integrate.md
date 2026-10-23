@@ -107,6 +107,45 @@ EOF
 
 `POST …/deployments/{id}/revoke` with the import token revokes a preview: reviewer sessions end, data stays readable.
 
+## Try Socrate against your own app locally
+
+Before deploying anything, you can run the service on your machine and point your app's dev server at it. From a clone of this repository (installed as in the README's "Try it locally"), with your app served on `http://127.0.0.1:5173` and its `.socrate/` folder at hand:
+
+```sh
+npm --prefix "$SOCRATE_DIR" run serve -- --origin http://127.0.0.1:5173 --manifest .socrate
+```
+
+`npm run serve` starts the real Worker under Miniflare, with local D1 and R2, on `http://127.0.0.1:8787`. On the first run it generates the issuer's ES256 key pair; later runs reuse it with the same storage. It configures one project whose `allowedOrigin` is the given origin and registers a deployment of your manifest for it. A relative `--manifest` is resolved from the directory you call it from; it can be a `.socrate/` folder or an assembled manifest file.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--origin` | required | Exact origin of your app, without path. |
+| `--manifest` | required | `.socrate/` folder or manifest JSON file. |
+| `--port` | `8787` (`SOCRATE_SERVICE_PORT`) | Port of the service; `0` takes a free one. |
+| `--project`, `--issuer` | `local`, `local-backend` | Project id and assertion issuer. |
+| `--state` | `.local/runtime/serve` of the clone | Storage, keys and host file. It must stay inside the clone; a relative path is resolved from the directory you call it from. |
+| `--deployment`, `--commit` | derived from the origin, the commit and the manifest; `0000000` | Deployment id and commit recorded with it. Leave `--deployment` unset: the same id with another origin or manifest is refused with `409 immutable_deployment`. |
+
+When the service is ready, it writes `<state>/host.json` (mode `0600`) and prints one JSON line on standard output, `{"event":"ready","hostConfig":"<path of host.json>","serviceUrl":"…"}`; logs go to standard error. `host.json` holds everything your app needs:
+
+```json
+{
+  "serviceUrl": "http://127.0.0.1:8787",
+  "instanceId": "…",
+  "projectId": "local",
+  "reviewKey": "my-app-pr-42",
+  "deploymentId": "local-3f2a9c41d0be",
+  "issuer": "local-backend",
+  "audience": "socrate",
+  "origin": "http://127.0.0.1:5173",
+  "privateKeyPath": "/…/.local/runtime/serve/keys/issuer-private.jwk.json"
+}
+```
+
+Give `serviceUrl`, `projectId`, `reviewKey` and `deploymentId` to the client as `preview`, and let your local backend sign assertions (step 1) with the private JWK at `privateKeyPath`, using `issuer`, `audience` and `origin` from the same file. This key is a local test key: never reuse it for a deployed instance. Only that origin gets sessions, so serve your app on exactly the same scheme, host and port.
+
+Ctrl+C or `SIGTERM` stops the service and deletes `host.json`; the command exits with code `0` once the closure is confirmed. A host launcher that runs the whole stack waits for the ready line, reads `host.json`, and sends `SIGTERM` when it stops. The command refuses to start if another one owns the same `--state`, if the port is taken, or if the previous run did not confirm its closure (a crash or `SIGKILL`). In that last case, check that no service of that state is still running, then delete `<state>.owner.json` as the message says.
+
 ## The `.socrate/` manifest
 
 Every import carries a manifest, which explains the review to reviewers. It is required: an import without it, or without a title, a before/now summary and at least one zone, is refused with `422 invalid_manifest`. The smallest valid folder has two files.

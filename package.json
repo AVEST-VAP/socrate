@@ -27,7 +27,8 @@
     "verify": "npm run typecheck && npm run test:contract && npm run test:browser",
     "measure:demo": "node tools/local/measure-demo.ts",
     "distant": "node tools/local/distant.ts",
-    "assemble": "node tools/local/assemble.ts"
+    "assemble": "node tools/local/assemble.ts",
+    "serve": "node tools/local/serve.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261015.1",
