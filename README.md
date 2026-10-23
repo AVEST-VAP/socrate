@@ -66,11 +66,17 @@ The demo data is fictional. The demo reaches no external service: the Worker's o
 
 ## Integrate into your app
 
-You provide three pieces. [docs/integrate.md](docs/integrate.md) has the contracts.
+```sh
+npm install @meyer0x/socrate
+```
+
+For an app built with Vite and React 19 and deployed from GitHub Actions, the package does most of the work: a `socrate.yml` of three values, a Vite plugin, one component behind `import.meta.env.SOCRATE`, and two CI steps. You provide three pieces; [docs/integrate.md](docs/integrate.md) has a complete example and the contracts.
 
 1. **An identity bridge in your backend.** An authenticated route checks your own session and returns a 60-second ES256 assertion naming the user, the preview origin and the requested capabilities. The private key stays in your backend.
-2. **The client, in preview builds only.** Either import the module served by your Socrate instance (`GET /v1/client` gives its URL, then call `mount(element, props)`; no npm package needed), or render the `SocrateReview` React component from `packages/react`. Both take the same three inputs: the preview context, `getIdentityAssertion(signal)` and a navigation adapter. Production builds must not include Socrate.
-3. **A CI step.** For each preview deployment, assemble the `.socrate/` manifest with `npm run assemble` and `PUT` the deployment with a `deployment.import` token. When the work is done, archive the review with a `review.archive` token.
+2. **The client, in preview builds only.** Render `SocrateReview` from `@meyer0x/socrate/react` behind `import.meta.env.SOCRATE`, which the plugin sets to `false` in every build except a prepared preview build. Without React or npm, import the module served by your Socrate instance (`GET /v1/client`, then `mount(element, props)`).
+3. **Two CI steps.** `npx socrate preview prepare` before the build turns Socrate on for pull requests that carry the `socrate` label; `npx socrate preview register` after the deployment registers the preview and its manifest with a `deployment.import` token. `npx socrate check-absent dist` checks production builds. Without the package, the import is a plain HTTP `PUT`. When the work is done, archive the review with a `review.archive` token.
+
+Package reference: [packages/socrate/README.md](packages/socrate/README.md).
 
 ## Self-host
 
@@ -87,6 +93,7 @@ The reference deployment is a Cloudflare Worker with one D1 database and one R2 
 | Path | Content |
 | --- | --- |
 | `packages/contract` | Versioned schemas of the manifest, the API and the service configuration (Zod), RFC 8785 canonicalization, error codes. |
+| `packages/socrate` | The published package `@meyer0x/socrate`: Vite plugin, React component and `socrate` CLI, with `packages/contract` and `packages/react` bundled. |
 | `packages/react` | The client: toolbar, pins, conversations, tab capture, media attachments, rendered in an `about:blank` iframe with its own styles. `mount()` entry for hosts without React. |
 | `apps/service` | The Worker: authentication, imports, threads, captures, attachments, agent API, archive and purge. Numbered SQL migrations with checksums. |
 | `apps/demo` | Fictional host app with a fake identity backend in its Vite plugin and a multi-file `.socrate/` manifest. |
@@ -98,10 +105,10 @@ The reference deployment is a Cloudflare Worker with one D1 database and one R2 
 Socrate is young software, built and used for one integrating application so far. Expect breaking changes before 1.0.
 
 - The local stack and the behaviours above are covered by automated tests (`npm run verify`). On a fresh clone, up to four browser cases fail: they are known failures, not regressions, listed in [CONTRIBUTING.md](CONTRIBUTING.md#known-failures-not-regressions), so `npm run verify` currently exits with code 1. The Cloudflare procedure has been replayed on a local D1 by `tools/local/test/distant.test.ts`; it has not been exercised against Cloudflare by this repository's tests.
-- The UI, the code messages, the code comments, the CLI verbs (`npm run distant -- preparer`, `acces-lecture`, `--sortie`…) and the test names are in French. The documentation is in English. Internationalization is not done yet.
+- The UI, the code messages, the code comments, the CLI verbs (`npm run distant -- preparer`, `acces-lecture`, `--sortie`…) and the test names are in French. The documentation, and the messages and commands of the `@meyer0x/socrate` package, are in English. Internationalization is not done yet.
 - Tab screenshots rely on `getDisplayMedia` with the current tab, so they work in Chromium-based browsers.
 - No scheduled job: purging archived reviews and backups are manual operations, and a full purge exists only for a stopped local instance.
-- The packages are not published on npm. Use the served `mount()` client, or vendor the workspace packages.
+- The `@meyer0x/socrate` package supports Vite, React 19 and GitHub Actions only. Other hosts use the served `mount()` client and a plain HTTP import.
 - Thirteen tool tests are skipped on purpose until their resource cleanup is bounded on every exit path. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

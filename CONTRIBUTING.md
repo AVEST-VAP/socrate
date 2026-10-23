@@ -31,7 +31,7 @@ All entry points (`demo`, `build:worker`, tests, the verification skill) go thro
 
 ```sh
 npm run typecheck      # TypeScript on packages, demo, tools and Worker
-npm run test:contract  # builds the Worker, then service, contract and tooling suites (node:test)
+npm run test:contract  # builds the Worker, then service, contract, package and tooling suites (node:test)
 npm run test:browser   # Chromium headless suites on the real demo
 npm run verify         # the three above
 npm run measure:demo   # production/preview builds, module graph, network trace per phase, budget
@@ -53,6 +53,12 @@ Default ports, all on `127.0.0.1`, changeable through environment variables when
 | `SOCRATE_VERIFY_SERVICE_PORT`, `SOCRATE_VERIFY_DEMO_PORT` | 8788, 5174 | verification skill |
 
 Browser suites write screenshots and facts under `.local/artifacts/<suite>/<timestamp>/`.
+
+## The `@meyer0x/socrate` package
+
+`packages/socrate` is the only published package. `npm run build -w @meyer0x/socrate` (`tools/local/build-package.ts`, behind the local boundary like the Worker build) writes the folder that is published, `packages/socrate/pack/`: `dist/` built with esbuild (`packages/contract` and `packages/react` bundled; `yaml`, `zod`, `mediabunny` and the React and Vite peers external; declarations copied from `packages/socrate/types/`, which `packages/socrate/test/public-types.ts` checks against the sources during `npm run typecheck`), the README, the license, and the workspace `package.json` without `private`, `scripts` and `devDependencies`. The workspace package is `private`, so `npm publish` never starts from the sources. Its tests run in `npm run test:contract`; the CLI tests drive a fake GitHub API and the real Worker under Miniflare. `npm run test:browser` also renders the component in Chromium (`packages/socrate/test/react.browser.ts`).
+
+Before a release, check the tarball from outside the workspace: `sh packages/socrate/scripts/consumer-check.sh` packs the package, installs it in a fresh Vite and React app under `.tmp/`, type-checks it, builds it without and with `SOCRATE_PREVIEW`, and runs `socrate check-absent` on both builds. It needs the npm registry for the app's own dependencies. Then `npm run build -w @meyer0x/socrate && npm publish --dry-run packages/socrate/pack` shows the published files; the release publishes the same folder. Publishing is a manual step of the maintainer; CI never publishes.
 
 ## Skipped tests
 
@@ -76,7 +82,7 @@ They are not marked `skip` on purpose: the first two may reveal a real defect of
 - TypeScript run directly by Node (type stripping), ES modules, no build step except the Worker bundle and the demo.
 - Validate at the boundary with the Zod schemas of `packages/contract`. Keep business rules in the service commands, not in callers.
 - Every D1 mutation writes its change-log entry in the same batch, and expresses its own preconditions in each statement.
-- The UI, the code messages, the code comments, the CLI verbs and options of `tools/local/` and the test names are in French for now; documentation is in English. Keep new code consistent with its surroundings. Exception: the options of `npm run serve`, its ready line and `host.json` form a public contract for host launchers and stay in English.
+- The UI, the code messages, the code comments, the CLI verbs and options of `tools/local/` and the test names are in French for now; documentation is in English. Keep new code consistent with its surroundings. Exceptions: the options of `npm run serve`, its ready line and `host.json` form a public contract for host launchers and stay in English; so do the messages, options and outputs of the `@meyer0x/socrate` package (`packages/socrate`).
 - Tests drive the real Worker under Miniflare and the real demo in Chromium. Do not mock the service.
 - Architecture decisions live in `docs/adr/`. Add one when you change a contract.
 

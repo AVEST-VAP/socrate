@@ -1,8 +1,78 @@
 # Integrate Socrate into your app
 
-An integration has three pieces: an identity bridge in your backend, the client in preview builds, and a CI step. The demo app in `apps/demo` implements all three with fictional data; each section points to the relevant file.
+An integration has three pieces: an identity bridge in your backend, the client in preview builds, and a CI step that registers each preview. For an app built with Vite and React 19 and deployed from GitHub Actions, the [`@meyer0x/socrate`](../packages/socrate/README.md) package provides the client and the CI step: you write the identity bridge, a `socrate.yml` and a few lines of wiring. Other apps use the module served by the instance and a plain HTTP call, described after the quick start.
 
-Throughout this guide, `my-app` is the project id, `my-backend` the issuer of your assertions, and `https://*.my-app-previews.pages.dev` the pattern of your preview URLs.
+Throughout this guide, `my-app` is the project id, `my-backend` the issuer of your assertions, and `https://*.my-app.pages.dev` the pattern of your preview URLs. The demo app in `apps/demo` implements every piece with fictional data.
+
+## Quick start with the package
+
+```sh
+npm install @meyer0x/socrate
+```
+
+`socrate.yml`, at the root of the app:
+
+```yaml
+service: https://my-socrate.example.workers.dev
+project: my-app
+previews: https://*.my-app.pages.dev
+```
+
+`vite.config.ts`, and the type of `import.meta.env.SOCRATE`:
+
+```ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { socrate } from '@meyer0x/socrate/vite';
+
+export default defineConfig({ plugins: [react(), socrate()] });
+```
+
+```ts
+// src/vite-env.d.ts
+/// <reference types="@meyer0x/socrate/vite/client" />
+```
+
+The component, behind the build-time flag (`false` in every build except a prepared preview build, so production bundles contain none of it):
+
+```tsx
+const preview = import.meta.env.SOCRATE;
+const SocrateReview = preview ? lazy(() => import('@meyer0x/socrate/react').then((m) => ({ default: m.SocrateReview }))) : null;
+
+async function getIdentityAssertion(signal: AbortSignal): Promise<string> {
+  const res = await fetch('/api/socrate/assertion', { method: 'POST', signal });
+  if (!res.ok) throw new Error('identity assertion refused');
+  return (await res.json()).assertion;
+}
+
+{preview && SocrateReview && user && (
+  <Suspense fallback={null}>
+    <SocrateReview
+      key={`${user.id}:${user.exploring?.account ?? ''}`}
+      preview={preview}
+      getIdentityAssertion={getIdentityAssertion}
+      navigation={{ current: () => location.pathname, go: (route) => navigate(route) }}
+    />
+  </Suspense>
+)}
+```
+
+Two steps in the pull request workflow, around your build and deploy steps (`on: pull_request` with the `labeled` and `unlabeled` types, `permissions: pull-requests: read`; if that workflow is a required check, read [Required checks](../packages/socrate/README.md#4-github-actions) first):
+
+```yaml
+      - id: socrate
+        run: npx socrate preview prepare --origin "https://pr-${{ github.event.pull_request.number }}.my-app.pages.dev"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: npm run build
+      # … deploy dist/ so that it is served on that origin …
+      - if: steps.socrate.outputs.enabled == 'true'
+        run: npx socrate preview register --url "https://pr-${{ github.event.pull_request.number }}.my-app.pages.dev/"
+        env:
+          SOCRATE_IMPORT_TOKEN: ${{ secrets.SOCRATE_IMPORT_TOKEN }}
+```
+
+A pull request gets a Socrate preview when it carries the `socrate` label. Run `npx socrate check-absent dist` after your production build. If your preview headers set a Content-Security-Policy, add `csp: _headers` (or your headers file) to `socrate.yml`, and allow `style-src 'unsafe-inline'`. The backend route `/api/socrate/assertion` is the identity bridge of step 1 below. Every option, the CSP completion and the commands are in the [package README](../packages/socrate/README.md).
 
 ## 1. Identity bridge
 
@@ -41,7 +111,9 @@ The client takes three inputs:
 - `getIdentityAssertion(signal)`: calls your route from step 1 and returns the JWT string; `signal` is aborted when the client unmounts;
 - `navigation`: `{ current(): string, go(route: string): void }`, wired to your router. Socrate uses it to know which screen a comment belongs to and to open the page of a thread.
 
-### Option A: the module served by your instance (no npm package)
+With React 19, render `SocrateReview` from `@meyer0x/socrate/react` as in the quick start. Its `preview` prop also takes the `origin` of the build: on any other origin, or inside an iframe, the component renders nothing. The `key` remounts the client when the user or the impersonated account changes in the same tab.
+
+### Without npm: the module served by your instance
 
 Your Socrate Worker serves a self-contained build of the client, React included. `GET /v1/client` returns `{ "url": "https://<worker>/client/<hash>.js" }`. Read it once per preview build (or at runtime) and import it:
 
@@ -49,7 +121,7 @@ Your Socrate Worker serves a self-contained build of the client, React included.
 const { url } = await (await fetch(`${SOCRATE_URL}/v1/client`)).json();
 const { mount } = await import(/* @vite-ignore */ url);
 const unmount = mount(document.getElementById('socrate'), {
-  preview: { serviceUrl: SOCRATE_URL, projectId: 'my-app', reviewKey: 'my-app-pr-42', deploymentId: 'my-app-pr-42-build-7' },
+  preview: { serviceUrl: SOCRATE_URL, projectId: 'my-app', reviewKey: 'pr-42', deploymentId: 'pr-42-build-7' },
   getIdentityAssertion: async (signal) => (await (await fetch('/api/socrate/assertion', { method: 'POST', signal })).json()).assertion,
   navigation: { current: () => location.pathname, go: (route) => history.pushState(null, '', route) },
 });
@@ -57,39 +129,29 @@ const unmount = mount(document.getElementById('socrate'), {
 
 The client files are immutable and served with `Access-Control-Allow-Origin` only to registered, non-revoked deployment origins: a page from another origin cannot import them. When the signed-in user changes without a page reload, call `unmount()` and `mount()` again. `tools/local/fixtures/mount-host.ts` is a host page without React that does exactly this.
 
-### Option B: the React component
-
-If your app uses React 19, render `SocrateReview` from `packages/react` (vendored or as a workspace dependency; the packages are not on npm yet):
-
-```tsx
-const SocrateReview = lazy(() => import('@socrate/react').then((m) => ({ default: m.SocrateReview })));
-
-{__SOCRATE_PREVIEW__ && user && (
-  <Suspense fallback={null}>
-    <SocrateReview key={`${user.id}:${user.exploring?.account ?? ''}`} preview={preview} getIdentityAssertion={getIdentityAssertion} navigation={navigation} />
-  </Suspense>
-)}
-```
-
-The `key` remounts the client when the user or the impersonated account changes in the same tab. See `apps/demo/src/socrate.tsx`.
-
 ### Keep it out of production
 
-Socrate must only ship in preview builds. The demo reads `SOCRATE_PREVIEW_BUILD` (`true`, `false` or unset; any other value fails the build) and exposes it as `__SOCRATE_PREVIEW__`. Behind that flag, the dynamic import, the styles, the manifest and the `data-socrate-*` attributes disappear from production bundles. `npm run measure:demo` checks this on the module graph of the demo build.
+Socrate must only ship in preview builds. With the package, everything behind `import.meta.env.SOCRATE` disappears from production bundles, and `npx socrate check-absent dist` fails if the client code or the service address is still there. Without the package, use your own build-time flag: the demo reads `SOCRATE_PREVIEW_BUILD` and exposes it as `__SOCRATE_PREVIEW__`, and `npm run measure:demo` checks the module graph of its production build.
 
 ### Optional attributes
 
 - `data-socrate-id="<id>"` on an element lets the manifest point zones and markers at it.
 - `data-socrate-wording="<wording-id>"` on the element that displays exactly one prepared wording attaches proposals made on it to that wording. Never put it on a container that displays several texts.
 
+Keep them behind the same flag (`{...(import.meta.env.SOCRATE && { 'data-socrate-id': 'settings' })}`) so that production markup does not carry them.
+
 ## 3. CI
 
 Configure the project in the service (see [self-host-cloudflare.md](self-host-cloudflare.md)), then issue two technical tokens, each limited to the project:
 
-- **`deployment.import`**, stored as a CI secret (`SOCRATE_IMPORT_TOKEN` below). For each preview deployment, CI assembles the `.socrate/` folder of the pull request and registers the deployment.
-- **`review.archive`**, kept out of CI: `POST /v1/projects/my-app/reviews/my-app-pr-42/archive` when the work is done. See [operations.md](operations.md).
+- **`deployment.import`**, stored as a CI secret (`SOCRATE_IMPORT_TOKEN` below). For each preview deployment, CI registers the deployment with its manifest.
+- **`review.archive`**, kept out of CI: `POST /v1/projects/my-app/reviews/pr-42/archive` when the work is done. See [operations.md](operations.md).
 
-The packages are not published on npm, so the CI job uses a clone of this repository (`npm ci` once) in `$SOCRATE_DIR`. From the root of your app's checkout, with `jq` and `curl`:
+With the package, the two steps of the quick start do it: `socrate preview prepare` before the build, `socrate preview register` after the deployment. The manifest is the `.socrate/` folder named by `manifest` in `socrate.yml` when the pull request has one, otherwise a generic one built from the pull request title and the `zones` of `socrate.yml`.
+
+### Without the package
+
+The CI job uses a clone of this repository (`npm ci` once) in `$SOCRATE_DIR`. From the root of your app's checkout, with `jq` and `curl`:
 
 ```sh
 npm --prefix "$SOCRATE_DIR" run --silent assemble -- .socrate > manifest.json

@@ -32,7 +32,7 @@ test('contrôle structurel : bibliothèques et routes navigateur seulement derri
     [/^import (?!type )[^;]*from ['"]playwright['"]/m, ['tools/local/browser.ts']],
     [/^import [^;]*from ['"]miniflare['"]/m, ['tools/local/runtime.ts']],
     [/^import [^;]*from ['"]esbuild['"]/m, []],
-    [/import\(['"]esbuild['"]\)/, ['tools/local/build-worker.ts', 'tools/local/test/boundary.test.ts']],
+    [/import\(['"]esbuild['"]\)/, ['tools/local/build-worker.ts', 'tools/local/build-package.ts', 'tools/local/test/boundary.test.ts']],
     [/['"]node:sqlite['"]/, ['tools/local/runtime.ts']],
     [/^import (?!type )[^;]*from ['"][./]*\/(runtime|browser)\.ts['"]/m, ['tools/local/local-run.ts']],
     [/\.route\(|\.routeWebSocket\(|route\.(fetch|continue|fulfill|abort)\(/, ['tools/local/browser.ts']],

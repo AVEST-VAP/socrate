@@ -1,0 +1,66 @@
+{
+  "name": "@meyer0x/socrate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Socrate for host apps: Vite plugin, React review component and CI commands for in-preview product review.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meyer0x/socrate.git",
+    "directory": "packages/socrate"
+  },
+  "homepage": "https://github.com/meyer0x/socrate#readme",
+  "keywords": ["review", "preview", "feedback", "vite", "react"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "socrate": "dist/cli.js"
+  },
+  "exports": {
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
+    "./vite/client": {
+      "types": "./dist/vite-client.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node ../../tools/local/build-package.ts"
+  },
+  "dependencies": {
+    "mediabunny": "1.62.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "vite": "^6 || ^7 || ^8"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@socrate/contract": "0.1.0",
+    "@socrate/react": "0.1.0",
+    "vite": "8.3.4"
+  }
+}

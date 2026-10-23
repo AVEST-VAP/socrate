@@ -4,6 +4,7 @@ node_modules/
 .tmp/
 .wrangler/
 dist/
+packages/socrate/pack/
 coverage/
 test-results/
 playwright-report/
