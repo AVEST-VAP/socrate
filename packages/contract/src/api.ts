@@ -13,7 +13,8 @@ export type ErrorCode =
   | 'immutable_deployment' | 'idempotency_conflict' | 'state_conflict' | 'review_inactive' | 'persistence_uncertain'
   | 'not_ready' | 'schema_incompatible' | 'misconfigured'
   | 'capture_mismatch' | 'capture_missing' | 'reservation_lost' | 'revision_changed' | 'resync_required' | 'maintenance'
-  | 'attachment_rejected' | 'attachment_missing';
+  | 'attachment_rejected' | 'attachment_missing'
+  | 'authorization_pending' | 'slow_down' | 'access_denied' | 'expired_token' | 'invalid_grant' | 'rate_limited';
 
 export type ApiError = { code: ErrorCode; message: string; requestId: string; retryable: boolean; issues?: { file?: string; path: string; message: string }[] };
 
@@ -122,9 +123,29 @@ export type Reservation = { status: 'reserved'; captureId: string; attempt: stri
 
 export const newMessageSchema = z.strictObject({ body: messageBody, attachments: attachmentList.optional() }).superRefine(withContent);
 export const stateChangeSchema = z.strictObject({ state: z.enum(['open', 'resolved']), expectedVersion: z.number().int().nonnegative() });
+/** Commit qui résout un fil : hexadécimal abrégé ou complet. */
+export const commitShaSchema = z.string().regex(/^[0-9a-f]{7,40}$/, 'commit hexadécimal de 7 à 40 caractères');
+const transitionMessage = z.string().trim().min(1, 'message requis').max(16_000);
+/** Résolution en une opération : le message est obligatoire, le commit facultatif. */
+export const resolveSchema = z.strictObject({ message: transitionMessage, commit: commitShaSchema.optional() });
+export const reopenSchema = z.strictObject({ message: transitionMessage });
+
+/** Nom d'agent ou de machine : texte imprimable sur une ligne, sans caractère de contrôle. */
+const printable = (max: number) => z.string().trim().min(1, 'texte requis').max(max, `au plus ${max} caractères`).regex(/^[^\p{C}]+$/u, 'caractères imprimables seulement');
+export const deviceStartSchema = z.strictObject({ projectId: z.string().min(1).max(64), agent: printable(32), machine: printable(64) });
+export const deviceTokenRequestSchema = z.strictObject({ deviceCode: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'code d’appareil invalide') });
 
 export type Exploring = { account: string; organisation: string | null } | null;
 export type Actor = { key: string; displayName: string };
+
+/** Réponse au démarrage d'une autorisation par code : `deviceCode` reste dans l'outil, `userCode` est affiché à la personne. */
+export type DeviceStart = { deviceCode: string; userCode: string; expiresIn: number; interval: number };
+/** Détails lus par le panneau avant la décision. */
+export type DeviceDetails = { userCode: string; projectId: string; agent: string; machine: string; createdAt: string; expiresAt: string };
+/** Jeton délégué remis une seule fois à l'échange. */
+export type AgentGrant = { accessToken: string; tokenType: 'Bearer'; tokenId: string; projectId: string; agent: string; machine: string; actor: Actor; capabilities: Capability[]; expiresAt: string };
+/** Jeton délégué listé dans le panneau, sans le secret. */
+export type AgentToken = { tokenId: string; agent: string; machine: string; capabilities: Capability[]; createdAt: string; lastUsedAt: string | null; expiresAt: string };
 
 export type Session = {
   sessionToken: string;
@@ -151,8 +172,13 @@ export type Proposal = { original: string; replacement: string; sourceRevisionId
 export type Attachment = AttachmentMeta & { attachmentId: string };
 /** Réservation des pièces d'une opération, dans l'ordre déclaré ; `uploaded` vaut aussi pour une pièce déjà rattachée par cette opération. */
 export type AttachmentReservation = { items: Array<{ attachmentId: string; uploaded: boolean }>; expiresAt: string };
-/** `body` vide seulement pour un message fait de pièces. `attachments` vide pour un message sans pièce, dont tous ceux d’avant les pièces jointes. */
-export type Message = { messageId: string; threadId: string; seq: number; author: Actor; exploring: Exploring; body: string; attachments: Attachment[]; createdAt: string };
+/** Changement d'état porté par un message : `commit` et `deploymentId` (dernier déploiement non révoqué au moment de l'écriture) pour une résolution. */
+export type Transition = { state: 'resolved' | 'open'; commit: string | null; deploymentId: string | null };
+/**
+ * `body` vide seulement pour un message fait de pièces. `attachments` vide pour un message sans pièce, dont tous ceux d’avant les pièces jointes.
+ * `via` nomme l'agent qui a écrit au nom de l'auteur, `null` pour un message écrit dans le navigateur.
+ */
+export type Message = { messageId: string; threadId: string; seq: number; author: Actor; exploring: Exploring; body: string; attachments: Attachment[]; via: string | null; transition: Transition | null; createdAt: string };
 export type Thread = {
   threadId: string; kind: 'global' | 'targeted'; state: 'open' | 'resolved'; version: number;
   revisionId: string; deploymentId: string; author: Actor; createdAt: string; updatedAt: string;

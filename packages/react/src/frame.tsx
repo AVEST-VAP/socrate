@@ -13,6 +13,8 @@ import type { Status } from './panel.tsx';
 
 // Surfaces éditoriales historiques : chargées seulement quand l'hôte passe `editorial`.
 const Panel = lazy(() => import('./panel.tsx').then((m) => ({ default: m.Panel })));
+// Connexion et révocation des agents : chargées à l'ouverture de « Connecter un agent ».
+const AgentsView = lazy(() => import('./agents.tsx').then((m) => ({ default: m.AgentsView })));
 
 const LIST_STYLE = { position: 'fixed', top: 0, right: 0, maxWidth: '100vw', height: '100vh', border: 'none', borderLeft: '1px solid #e4e4e7', boxShadow: '-8px 0 24px -12px rgb(0 0 0 / .12)', zIndex: 2147483000, background: '#fff' } as const;
 const BUBBLE_STYLE = { position: 'fixed', border: '1px solid #e4e4e7', borderRadius: 12, boxShadow: '0 12px 32px -8px rgb(0 0 0 / .2), 0 2px 6px rgb(0 0 0 / .05)', zIndex: 2147483002, background: '#fff', colorScheme: 'light' } as const;
@@ -104,6 +106,8 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   }, []);
 
   const [listOpen, setListOpen] = useState(false);
+  // La liste affiche les agents à la place des conversations jusqu'au retour ou à sa fermeture.
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [focusGeneral, setFocusGeneral] = useState(0);
   const [pref, setPref] = useState(storedWidth);
@@ -460,6 +464,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const openThread = (threadId: string) => setExpanded((e) => (e === threadId ? null : threadId));
   const closeList = () => {
     setListOpen(false);
+    setAgentsOpen(false);
     focusControl('launcher');
   };
 
@@ -740,10 +745,11 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     actions.current = (action, control, event) => {
       if (control.getAttribute('aria-disabled') === 'true') return;
       if (action === 'target') void startTargeting(control.dataset.retarget === 'true');
-      else if (action === 'launcher') { setMoreOpen(false); setListOpen((o) => !o); }
+      else if (action === 'launcher') { setMoreOpen(false); setAgentsOpen(false); setListOpen((o) => !o); }
+      else if (action === 'agents') { setMoreOpen(false); setAgentsOpen(true); setListOpen(true); }
       else if (action === 'more') setMoreOpen((o) => !o);
       else if (action === 'close') closeAll();
-      else if (action === 'general') { setMoreOpen(false); setListOpen(true); setFocusGeneral((n) => n + 1); }
+      else if (action === 'general') { setMoreOpen(false); setAgentsOpen(false); setListOpen(true); setFocusGeneral((n) => n + 1); }
       else if (action === 'resize') { if (event.type === 'pointerdown') startResize(event as PointerEvent, control); }
       else if (action === 'pins') { setMoreOpen(false); setPinsHidden((h) => !h); }
       else if (action === 'stop') { setMoreOpen(false); captureRef.current?.deactivate(); }
@@ -858,6 +864,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
             </button>
             <button type="button" role="menuitem" data-socrate-action="pins">{pinsHidden ? 'Afficher les pastilles' : 'Masquer les pastilles'}</button>
             <button type="button" role="menuitemcheckbox" aria-checked={shortcut} data-socrate-action="shortcut">Raccourci C pour commenter</button>
+            <button type="button" role="menuitem" data-socrate-action="agents">Connecter un agent</button>
             {sharing && <button type="button" role="menuitem" data-socrate-action="stop">Arrêter le partage</button>}
           </div>
         )}
@@ -903,7 +910,9 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       {listDoc && createPortal(
         <Boundary>
           {!editorial && <Tip doc={listDoc.ownerDocument} />}
-          {editorial
+          {agentsOpen
+            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><AgentsView client={client} onBack={() => setAgentsOpen(false)} onClose={closeList} headingRef={headingRef} /></Suspense>
+            : editorial
             ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><Panel client={client} capture={capture} navigation={navigation} visible={listOpen} onClose={closeList} revision={revision} threads={threads} status={status} refresh={refresh} /></Suspense>
             : <ConversationList review={review} title={revision?.manifest.title ?? null} status={status} route={route} located={located} expanded={expanded} onOpen={openThread} onGoto={(id) => void goTo(id)} onClose={closeList} headingRef={headingRef} generalRef={generalRef} />}
         </Boundary>,

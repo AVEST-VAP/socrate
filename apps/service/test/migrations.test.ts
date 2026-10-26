@@ -18,11 +18,11 @@ test('les migrations s’appliquent sur une base vierge et se rejouent sans effe
   const tables = await s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all<{ name: string }>();
   assert.ok(tables.results.map((t) => t.name).includes('threads'));
   const second = await rt.applyMigrations(s.db);
-  assert.deepEqual(second, { applied: [], skipped: ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql'] });
+  assert.deepEqual(second, { applied: [], skipped: ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql'] });
   await s.stop();
   s = await startHeld({ root, port: 0, projects });
   const rows = await s.db.prepare('SELECT id FROM schema_migrations').all<{ id: string }>();
-  assert.deepEqual(rows.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql']);
+  assert.deepEqual(rows.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql']);
   await s.stop();
   claim.release();
 });
@@ -68,7 +68,7 @@ test('barrière de migration : aucune route ne répond avant la fin des migratio
   await rt.applyMigrations(empty.db);
   const h = await fetch(`${empty.url}/v1/health`);
   assert.equal(h.status, 200);
-  assert.deepEqual(((await h.json()) as { schema: string[] }).schema, ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql']);
+  assert.deepEqual(((await h.json()) as { schema: string[] }).schema, ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql']);
   await empty.stop();
 
   const dir = join(root, 'migrations');
@@ -80,13 +80,14 @@ test('barrière de migration : aucune route ne répond avant la fin des migratio
   await cp(join(rt.MIGRATIONS_DIR, '0005_agent_api.sql'), join(dir, '0005_agent_api.sql'));
   await cp(join(rt.MIGRATIONS_DIR, '0006_operations.sql'), join(dir, '0006_operations.sql'));
   await cp(join(rt.MIGRATIONS_DIR, '0007_attachments.sql'), join(dir, '0007_attachments.sql'));
-  await writeFile(join(dir, '0008_suivante.sql'), 'CREATE TABLE suivante (id TEXT PRIMARY KEY);\n');
+  await cp(join(rt.MIGRATIONS_DIR, '0008_agent_tokens.sql'), join(dir, '0008_agent_tokens.sql'));
+  await writeFile(join(dir, '0009_suivante.sql'), 'CREATE TABLE suivante (id TEXT PRIMARY KEY);\n');
   const next = await startHeld({ root, projects, migrationsDir: dir, migrate: false });
   await notReady(next.url, '/v1/health');
-  assert.deepEqual((await rt.applyMigrations(next.db, dir)).applied, ['0008_suivante.sql']);
+  assert.deepEqual((await rt.applyMigrations(next.db, dir)).applied, ['0009_suivante.sql']);
   const h2 = await fetch(`${next.url}/v1/health`);
   assert.equal(h2.status, 200);
-  assert.deepEqual(((await h2.json()) as { schema: string[] }).schema, ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_suivante.sql']);
+  assert.deepEqual(((await h2.json()) as { schema: string[] }).schema, ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql', '0009_suivante.sql']);
   await next.stop();
   claim.release();
 });
@@ -104,7 +105,8 @@ test('schéma futur, trou ou checksum divergent : refus explicite schema_incompa
   await cp(join(rt.MIGRATIONS_DIR, '0005_agent_api.sql'), join(future, '0005_agent_api.sql'));
   await cp(join(rt.MIGRATIONS_DIR, '0006_operations.sql'), join(future, '0006_operations.sql'));
   await cp(join(rt.MIGRATIONS_DIR, '0007_attachments.sql'), join(future, '0007_attachments.sql'));
-  await writeFile(join(future, '0008_future.sql'), 'CREATE TABLE future (id TEXT PRIMARY KEY);\n');
+  await cp(join(rt.MIGRATIONS_DIR, '0008_agent_tokens.sql'), join(future, '0008_agent_tokens.sql'));
+  await writeFile(join(future, '0009_future.sql'), 'CREATE TABLE future (id TEXT PRIMARY KEY);\n');
   const ahead = await startHeld({ root, projects, migrationsDir: future });
   await ahead.db.prepare("INSERT INTO reviews (project_id, review_key, state, created_at) VALUES ('demo', 'temoin', 'active', '2026-10-16T00:00:00Z')").run();
   await ahead.stop();
@@ -119,9 +121,9 @@ test('schéma futur, trou ou checksum divergent : refus explicite schema_incompa
   const witness = await stale.db.prepare("SELECT COUNT(*) AS n FROM reviews WHERE review_key = 'temoin'").first<{ n: number }>();
   assert.equal(witness!.n, 1, 'données conservées, aucun reset');
   const applied = await stale.db.prepare('SELECT id FROM schema_migrations ORDER BY id').all<{ id: string }>();
-  assert.deepEqual(applied.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_future.sql']);
-  await stale.db.prepare("DELETE FROM schema_migrations WHERE id = '0008_future.sql'").run();
-  await stale.db.prepare("INSERT INTO schema_migrations (id, checksum, applied_at) VALUES ('0009_trou.sql', 'abc', '2026-10-16T00:00:00Z')").run();
+  assert.deepEqual(applied.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql', '0009_future.sql']);
+  await stale.db.prepare("DELETE FROM schema_migrations WHERE id = '0009_future.sql'").run();
+  await stale.db.prepare("INSERT INTO schema_migrations (id, checksum, applied_at) VALUES ('0010_trou.sql', 'abc', '2026-10-16T00:00:00Z')").run();
   await stale.stop();
   await assert.rejects(startHeld({ root, projects, migrationsDir: future }), (e: Error) => e instanceof rt.SchemaIncompatible && /incompatible/.test(e.message));
   const gap = await startHeld({ root, projects, migrationsDir: future, migrate: false });
@@ -210,7 +212,7 @@ test('0004 ajoute les propositions sur une base au schéma 0003 déjà peuplée 
   await before.stop();
   const after = await startHeld({ root, projects });
   const applied = await after.db.prepare('SELECT id FROM schema_migrations ORDER BY id').all<{ id: string }>();
-  assert.deepEqual(applied.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql']);
+  assert.deepEqual(applied.results.map((r) => r.id), ['0001_pilot.sql', '0002_capture.sql', '0003_revocation.sql', '0004_wording.sql', '0005_agent_api.sql', '0006_operations.sql', '0007_attachments.sql', '0008_agent_tokens.sql']);
   assert.deepEqual(await after.db.prepare("SELECT revoked_at FROM deployments WHERE deployment_id = 'd'").first(), { revoked_at: at }, 'révocation conservée');
   assert.deepEqual(await after.db.prepare("SELECT kind, state, version FROM threads WHERE thread_id = 't1'").first(), { kind: 'global', state: 'open', version: 1 });
   assert.equal((await after.db.prepare("SELECT body FROM messages WHERE thread_id = 't1'").first<{ body: string }>())!.body, 'Avis antérieur');
@@ -265,14 +267,16 @@ test('0005 ajoute l’accès agent sur une base au schéma 0004 déjà peuplée 
 
   // 0006 sur cette base au schéma 0005 peuplée : reconstruction de reviews sans perte, gel inactif, déclencheurs posés.
   const ops = await startHeld({ root, projects });
-  assert.deepEqual((await ops.db.prepare('SELECT id FROM schema_migrations ORDER BY id').all<{ id: string }>()).results.map((r) => r.id).at(-1), '0007_attachments.sql');
+  assert.deepEqual((await ops.db.prepare('SELECT id FROM schema_migrations ORDER BY id').all<{ id: string }>()).results.map((r) => r.id).at(-1), '0008_agent_tokens.sql');
   const old = JSON.parse(kept) as Record<string, unknown>[][];
   const now = JSON.parse(await dump(ops.db)) as Record<string, unknown>[][];
-  assert.deepEqual(now.slice(1), old.slice(1), 'neuf tables métier identiques après 0006');
+  const messages = tables.indexOf('messages');
+  old[messages] = old[messages]!.map((r) => ({ ...r, via: null, transition: null, commit_sha: null, deployment_id: null }));
+  assert.deepEqual(now.slice(1), old.slice(1), 'neuf tables métier identiques après 0006 à 0008, messages sans agent ni transition');
   assert.deepEqual(now[0], old[0]!.map((r) => ({ ...r, archived_at: null, purge_after: null, purge_run: null, purged_at: null })), 'revue intacte, colonnes d’archivage vides');
   assert.equal((await ops.db.prepare('SELECT epoch FROM sync_epoch').first<{ epoch: string }>())!.epoch, epoch);
   assert.deepEqual(await ops.db.prepare('SELECT frozen FROM maintenance').first(), { frozen: 0 });
-  assert.equal((await ops.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'frozen_%'").first<{ n: number }>())!.n, 60);
+  assert.equal((await ops.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'frozen_%'").first<{ n: number }>())!.n, 69);
   assert.equal((await ops.db.prepare('PRAGMA foreign_key_check').all()).results.length, 0);
   await assert.rejects(ops.db.prepare("INSERT INTO revisions (project_id, review_key, revision_id, manifest, created_at) VALUES ('demo', 'absente', 'x', '{}', ?)").bind(at).run(), /FOREIGN KEY/i, 'les révisions référencent toujours reviews');
   await ops.stop();

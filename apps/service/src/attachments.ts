@@ -3,7 +3,7 @@ import type { Env } from './env.ts';
 import { isConstraintViolation, uncertain } from './d1.ts';
 import { HttpError, PRIVATE_HEADERS, nowIso } from './http.ts';
 import { RESERVATION_TTL_SECONDS } from './captures.ts';
-import { ACTIVE_REVIEW, requireActive, type Guard, type ParticipantScope } from './threads.ts';
+import { ACTIVE_REVIEW, requireActive, type Guard, type ParticipantScope, type WriterScope } from './threads.ts';
 
 export const ATTACHMENT_PREFIX = 'attachments/';
 export const attachmentPrefixOf = (projectId: string, reviewKey: string) => `${ATTACHMENT_PREFIX}${projectId}/${reviewKey}/`;
@@ -18,7 +18,7 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 const metaOf = (r: Pick<Row, 'name' | 'content_type' | 'size' | 'sha256'>): AttachmentMeta => ({ name: r.name, contentType: r.content_type, size: r.size, sha256: r.sha256 });
 const sameMeta = (a: AttachmentMeta, b: AttachmentMeta) => a.name === b.name && a.contentType === b.contentType && a.size === b.size && a.sha256 === b.sha256;
 const OWNED = 'project_id = ? AND review_key = ? AND actor_key = ? AND operation = ? AND idempotency_key = ?';
-const ownedBinds = (p: ParticipantScope, operation: AttachmentOperation, key: string) => [p.projectId, p.reviewKey, p.actor.key, operation, key];
+const ownedBinds = (p: WriterScope, operation: AttachmentOperation, key: string) => [p.projectId, p.reviewKey, p.actor.key, operation, key];
 
 /** Empreinte de la liste ordonnée des pièces : une même clé ne réserve jamais deux listes différentes. */
 const listDigest = (list: AttachmentMeta[]) => digestOf(list as unknown as Json);
@@ -140,7 +140,7 @@ export type AttachPlan = { guard: Guard; attach: (threadId: string, messageId: s
  * réservations encore valides. `guard` conditionne la création du message dans le même batch ; `attach` les lie au message créé.
  * Une liste vide rend `null` : le message garde la forme d’avant les pièces jointes.
  */
-export async function planAttachments(env: Env, input: { scope: ParticipantScope; operation: AttachmentOperation; key: string; attachments: AttachmentMeta[] | undefined }): Promise<AttachPlan | null> {
+export async function planAttachments(env: Env, input: { scope: WriterScope; operation: AttachmentOperation; key: string; attachments: AttachmentMeta[] | undefined }): Promise<AttachPlan | null> {
   const declared = input.attachments ?? [];
   if (!declared.length) return null;
   const p = input.scope;

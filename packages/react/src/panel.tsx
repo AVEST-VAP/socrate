@@ -3,7 +3,7 @@ import type { Message, Revision, ThreadWithMessages, Session } from '@socrate/co
 import type { TabCapture, CaptureStatus } from './capture.ts';
 import type { Cycle } from './guide.tsx';
 import { ReviewClient, isStaleTargeted, ownerOf, type Owner } from './client.ts';
-import { COMMENT_LABELS, MessageMedia, Notice, TARGETED_LABELS, describeCapture, useSubmission } from './conversation.tsx';
+import { COMMENT_LABELS, MessageMedia, Notice, TARGETED_LABELS, describeCapture, describeTransition, useSubmission } from './conversation.tsx';
 
 export type NavigationAdapter = { go(route: string): void; current(): string };
 
@@ -260,7 +260,9 @@ function ThreadView({ epoch, thread, client, navigation, revisionId, session, se
         <div className="socrate-message" key={m.messageId}>
           <div className="socrate-meta">
             <strong>{m.author.displayName}</strong>
+            {m.via ? ` · via ${m.via}` : ''}
             {m.exploring ? ` (compte exploré : ${m.exploring.account})` : ''} · {formatDate(m.createdAt)}
+            {m.transition ? ` · ${describeTransition(m.transition)}` : ''}
           </div>
           <p>{m.body}</p>
           {m.attachments.length > 0 && <Suspense fallback={null}><MessageMedia client={client} attachments={m.attachments} /></Suspense>}

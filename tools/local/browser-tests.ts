@@ -2468,7 +2468,7 @@ test('wording : remplacement possédé par le brouillon, révision observée fig
     await p.getByTestId('socrate-kept-replacement').getByRole('button', { name: 'Rattacher à l’élément ciblé' }).click();
     assert.equal(await p.getByTestId('socrate-kept-replacement').count(), 0);
     assert.equal(await replacementBox.inputValue(), 'Brouillon à conserver après arrêt');
-    assert.ok(await publishTargeted.isEnabled());
+    await p.getByRole('button', { name: 'Publier le retour ciblé', disabled: false }).waitFor({ timeout: 5_000 });
 
     loseOnce(ctx, isCommit);
     await publishTargeted.click();

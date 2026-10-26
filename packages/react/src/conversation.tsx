@@ -204,13 +204,19 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
   );
 }
 
+/** « Résolu dans abc1234 » ou « Rouvert », avec le déploiement relevé à la résolution, pour un changement d'état écrit avec son message. */
+export const describeTransition = (t: NonNullable<Message['transition']>) =>
+  `${t.state === 'resolved' ? `Résolu${t.commit ? ` dans ${t.commit.slice(0, 7)}` : ''}` : 'Rouvert'}${t.deploymentId ? ` · déploiement ${t.deploymentId}` : ''}`;
+
 function MessageView({ m, client }: { m: Message; client: ReviewClient }) {
   return (
     <div className="socrate-msg" data-testid="socrate-message">
       <Avatar actor={m.author} />
       <div>
         <strong title={m.exploring ? `Compte exploré : ${m.exploring.account}` : undefined}>{m.author.displayName}</strong>
+        {m.via && <span className="socrate-meta" data-testid="socrate-via">· via {m.via} </span>}
         <When iso={m.createdAt} />
+        {m.transition && <p className="socrate-meta" data-testid="socrate-transition">{describeTransition(m.transition)}</p>}
         <p>{m.body}</p>
         {m.attachments.length > 0 && <Suspense fallback={null}><MessageMedia client={client} attachments={m.attachments} /></Suspense>}
       </div>

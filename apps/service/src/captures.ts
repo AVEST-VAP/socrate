@@ -122,7 +122,7 @@ export async function commitTargeted(env: Env, input: { scope: ParticipantScope;
   const snapshot: ThreadWithMessages = {
     threadId, kind: 'targeted', state: 'open', version: 0, revisionId: revision.revisionId, deploymentId: p.deploymentId, author: p.actor, createdAt: at, updatedAt: at,
     target: payload.target, capture: { captureId: row.capture_id, status: 'available', ...payload.image }, proposal,
-    messages: [{ messageId, threadId, seq: 1, author: p.actor, exploring: p.exploring, body: payload.body, attachments: pieces?.attachments ?? [], createdAt: at }],
+    messages: [{ messageId, threadId, seq: 1, author: p.actor, exploring: p.exploring, body: payload.body, attachments: pieces?.attachments ?? [], via: null, transition: null, createdAt: at }],
   };
   const owned: Guard = {
     sql: "SELECT 1 FROM captures WHERE project_id = ? AND review_key = ? AND capture_id = ? AND actor_key = ? AND state = 'reserved' AND attempt = ? AND payload_digest = ? AND uploaded = 1 AND expires_at > ?",

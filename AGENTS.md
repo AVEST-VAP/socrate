@@ -16,4 +16,4 @@ Socrate lets reviewers comment inside preview deployments and lets agents read t
 
 ## Reading feedback as an agent
 
-Use [docs/agent-api.md](docs/agent-api.md) with a `review.read` token. To prepare a review for product people, write a `.socrate/` manifest as described in [docs/integrate.md](docs/integrate.md#the-socrate-manifest).
+Use the `socrate` CLI (`npx @meyer0x/socrate`) after `npx @meyer0x/socrate login` ([packages/socrate/README.md](packages/socrate/README.md#for-coding-agents)), or [docs/agent-api.md](docs/agent-api.md) with a `review.read` token for automation without a person. To prepare a review for product people, write a `.socrate/` manifest as described in [docs/integrate.md](docs/integrate.md#the-socrate-manifest).

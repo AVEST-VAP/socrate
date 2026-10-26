@@ -1,4 +1,4 @@
-import { digestOf, type Actor, type Attachment, type AttachmentMeta, type Capability, type Exploring, type Json, type ListProposal, type Message, type Thread, type ThreadWithMessages } from '@socrate/contract';
+import { digestOf, type Actor, type Attachment, type AttachmentMeta, type Capability, type Exploring, type Json, type ListProposal, type Message, type Thread, type ThreadWithMessages, type Transition } from '@socrate/contract';
 import type { Env } from './env.ts';
 import { isConstraintViolation, uncertain } from './d1.ts';
 import { HttpError, nowIso } from './http.ts';
@@ -14,11 +14,16 @@ export async function requireActive(env: Env, projectId: string, reviewKey: stri
   }
 }
 
-export type ParticipantScope = { projectId: string; reviewKey: string; deploymentId: string; actor: Actor; exploring: Exploring; capabilities: Capability[] };
+/** Auteur d'une écriture : session de relecteur sur un déploiement, ou agent délégué (`via`), sans déploiement. */
+export type WriterScope = { projectId: string; reviewKey: string; deploymentId: string | null; actor: Actor; exploring: Exploring; capabilities: Capability[]; via: string | null };
+export type ParticipantScope = WriterScope & { deploymentId: string };
 export type ThreadState = Thread['state'];
 
 type ThreadRow = { thread_id: string; kind: Thread['kind']; state: ThreadState; version: number; revision_id: string; deployment_id: string; author_key: string; author_name: string; created_at: string; updated_at: string };
-type MessageRow = { message_id: string; thread_id: string; seq: number; author_key: string; author_name: string; exploring: string | null; body: string; created_at: string };
+type MessageRow = {
+  message_id: string; thread_id: string; seq: number; author_key: string; author_name: string; exploring: string | null; body: string; created_at: string;
+  via: string | null; transition: Transition['state'] | null; commit_sha: string | null; deployment_id: string | null;
+};
 type OperationRow = { payload_digest: string; result: string };
 
 type TargetRow = { thread_id: string; capture_id: string; context: string; content_type: 'image/png'; size: number; sha256: string; width: number; height: number };
@@ -33,7 +38,8 @@ const toThread = (r: ThreadRow, target: TargetRow | undefined, proposal: Proposa
 });
 const toMessage = (r: MessageRow, attachments: Attachment[] = []): Message => ({
   messageId: r.message_id, threadId: r.thread_id, seq: r.seq, author: { key: r.author_key, displayName: r.author_name },
-  exploring: r.exploring ? JSON.parse(r.exploring) : null, body: r.body, attachments, createdAt: r.created_at,
+  exploring: r.exploring ? JSON.parse(r.exploring) : null, body: r.body, attachments, via: r.via,
+  transition: r.transition ? { state: r.transition, commit: r.commit_sha, deploymentId: r.deployment_id } : null, createdAt: r.created_at,
 });
 const byMessage = (rows: AttachmentRow[]) => {
   const m = new Map<string, Attachment[]>();
@@ -41,10 +47,10 @@ const byMessage = (rows: AttachmentRow[]) => {
   return m;
 };
 
-/** Résultat enregistré d'une opération de fil : un instantané d’avant les pièces jointes n'a pas de pièces, rendu avec une liste vide. */
+/** Résultat enregistré d'une opération de fil : un instantané d’avant les pièces jointes ou les agents est rendu avec une liste vide et sans agent. */
 export const asThread = (stored: Json): ThreadWithMessages => {
   const t = stored as unknown as ThreadWithMessages;
-  return { ...t, messages: t.messages.map((m) => ({ ...m, attachments: m.attachments ?? [] })) };
+  return { ...t, messages: t.messages.map((m) => ({ ...m, attachments: m.attachments ?? [], via: m.via ?? null, transition: m.transition ?? null })) };
 };
 
 /** `reference` est la révision contre laquelle le décalage des textes préparés est signalé. `ids` restreint la lecture et fixe l'ordre rendu. */
@@ -85,11 +91,11 @@ export async function getThread(env: Env, projectId: string, reviewKey: string, 
   return { ...toThread(t, target ?? undefined, proposal ?? undefined, reference), messages: m.results.map((r) => toMessage(r, pieces.get(r.message_id))) };
 }
 
-type OperationKind = 'thread.create' | 'thread.targeted' | 'message.create' | 'thread.state';
+type OperationKind = 'thread.create' | 'thread.targeted' | 'message.create' | 'thread.state' | 'thread.transition';
 export type Scope = { projectId: string; reviewKey: string; actorKey: string; kind: OperationKind; key: string };
 export type Guard = { sql: string; binds: unknown[] };
 
-export const scopeOf = (p: ParticipantScope, kind: OperationKind, key: string): Scope => ({ projectId: p.projectId, reviewKey: p.reviewKey, actorKey: p.actor.key, kind, key });
+export const scopeOf = (p: WriterScope, kind: OperationKind, key: string): Scope => ({ projectId: p.projectId, reviewKey: p.reviewKey, actorKey: p.actor.key, kind, key });
 
 export async function recordedResult(env: Env, scope: Scope, digest: string): Promise<Json | null> {
   const op = await env.DB.prepare('SELECT payload_digest, result FROM operations WHERE project_id = ? AND review_key = ? AND actor_key = ? AND kind = ? AND idempotency_key = ?')
@@ -147,7 +153,7 @@ export async function publish(env: Env, input: { scope: ParticipantScope; key: s
   const snapshot: ThreadWithMessages = {
     threadId, kind: 'global', state: 'open', version: 0, revisionId: revision.revisionId, deploymentId: p.deploymentId, author: p.actor, createdAt: at, updatedAt: at,
     target: null, capture: null, proposal,
-    messages: [{ messageId, threadId, seq: 1, author: p.actor, exploring: p.exploring, body: input.body, attachments: pieces?.attachments ?? [], createdAt: at }],
+    messages: [{ messageId, threadId, seq: 1, author: p.actor, exploring: p.exploring, body: input.body, attachments: pieces?.attachments ?? [], via: null, transition: null, createdAt: at }],
   };
   const produced: Guard = { sql: 'SELECT 1 FROM threads WHERE project_id = ? AND review_key = ? AND thread_id = ?', binds: [p.projectId, p.reviewKey, threadId] };
   const outcome = await commit(env, scope, digest, {
@@ -178,7 +184,7 @@ export async function publish(env: Env, input: { scope: ParticipantScope; key: s
 
 export type Replied = { created: boolean; message: Message };
 
-export async function reply(env: Env, input: { scope: ParticipantScope; key: string; threadId: string; body: string; attachments?: AttachmentMeta[] }): Promise<Replied> {
+export async function reply(env: Env, input: { scope: WriterScope; key: string; threadId: string; body: string; attachments?: AttachmentMeta[] }): Promise<Replied> {
   const p = input.scope;
   const threadId = input.threadId;
   const digest = await digestOf({ threadId, body: input.body, ...(input.attachments?.length && { attachments: input.attachments }) } as Json);
@@ -200,11 +206,11 @@ export async function reply(env: Env, input: { scope: ParticipantScope; key: str
   const outcome = await commit(env, scope, digest, {
     before: [],
     mutation: env.DB.prepare(
-      `INSERT INTO messages (project_id, review_key, thread_id, message_id, seq, author_key, author_name, exploring, body, created_at)
-       SELECT t.project_id, t.review_key, t.thread_id, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages m WHERE m.project_id = t.project_id AND m.review_key = t.review_key AND m.thread_id = t.thread_id), ?, ?, ?, ?, ?
+      `INSERT INTO messages (project_id, review_key, thread_id, message_id, seq, author_key, author_name, exploring, body, created_at, via)
+       SELECT t.project_id, t.review_key, t.thread_id, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages m WHERE m.project_id = t.project_id AND m.review_key = t.review_key AND m.thread_id = t.thread_id), ?, ?, ?, ?, ?, ?
        FROM threads t JOIN reviews v ON v.project_id = t.project_id AND v.review_key = t.review_key
        WHERE t.project_id = ? AND t.review_key = ? AND t.thread_id = ? AND v.state = 'active'${pieces ? ` AND EXISTS (${pieces.guard.sql})` : ''}`,
-    ).bind(messageId, p.actor.key, p.actor.displayName, p.exploring ? JSON.stringify(p.exploring) : null, input.body, at, p.projectId, p.reviewKey, threadId, ...(pieces?.guard.binds ?? [])),
+    ).bind(messageId, p.actor.key, p.actor.displayName, p.exploring ? JSON.stringify(p.exploring) : null, input.body, at, p.via, p.projectId, p.reviewKey, threadId, ...(pieces?.guard.binds ?? [])),
     after: [
       ...(pieces ? [pieces.attach(threadId, messageId, produced)] : []),
       env.DB.prepare(`UPDATE threads SET updated_at = ? WHERE project_id = ? AND review_key = ? AND thread_id = ? AND EXISTS (${produced.sql})`).bind(at, p.projectId, p.reviewKey, threadId, ...produced.binds),
@@ -273,4 +279,58 @@ async function recordSatisfied(env: Env, scope: Scope, digest: string, thread: T
     throw uncertain();
   }
   return { created: false, thread };
+}
+
+/** Dernier déploiement non révoqué de la revue, lu dans l'instruction même qui écrit la résolution. */
+const LATEST_LIVE_DEPLOYMENT = `(SELECT d.deployment_id FROM deployments d WHERE d.project_id = ? AND d.review_key = ? AND d.revoked_at IS NULL ORDER BY d.created_at DESC, d.deployment_id DESC LIMIT 1)`;
+
+/**
+ * Résolution ou réouverture accompagnée de son message, en un seul batch : le message porte la transition, l'agent éventuel,
+ * le commit et, pour une résolution, le dernier déploiement non révoqué. Un fil déjà dans l'état demandé est refusé, sauf reprise de la même clé.
+ */
+export async function transition(env: Env, input: { scope: WriterScope; key: string; threadId: string; state: ThreadState; body: string; commit: string | null }): Promise<Replied> {
+  const p = input.scope;
+  const { threadId, state, body } = input;
+  const commitSha = state === 'resolved' ? input.commit : null;
+  const digest = await digestOf({ threadId, state, body, commit: commitSha });
+  const scope = scopeOf(p, 'thread.transition', input.key);
+  const findMessage = async (messageId: string) => {
+    const row = await env.DB.prepare('SELECT * FROM messages WHERE project_id = ? AND review_key = ? AND thread_id = ? AND message_id = ?').bind(p.projectId, p.reviewKey, threadId, messageId).first<MessageRow>();
+    if (!row) throw uncertain('résultat introuvable');
+    return toMessage(row);
+  };
+  const stored = await recordedResult(env, scope, digest);
+  if (stored !== null) return { created: false, message: await findMessage((stored as { messageId: string }).messageId) };
+  const before = await env.DB.prepare('SELECT * FROM threads WHERE project_id = ? AND review_key = ? AND thread_id = ?').bind(p.projectId, p.reviewKey, threadId).first<ThreadRow>();
+  if (!before) throw new HttpError(404, 'not_found', 'retour inconnu');
+  if (before.author_key !== p.actor.key && !p.capabilities.includes('thread.moderate')) throw new HttpError(403, 'forbidden', 'seul l’auteur ou un développeur change l’état');
+  await requireActive(env, p.projectId, p.reviewKey);
+  if (before.state === state) throw new HttpError(409, 'state_conflict', state === 'resolved' ? 'retour déjà résolu : répondre sans changer l’état' : 'retour déjà ouvert : répondre sans changer l’état');
+  const messageId = crypto.randomUUID();
+  const at = nowIso();
+  const guard: Guard = {
+    sql: `SELECT 1 FROM threads WHERE project_id = ? AND review_key = ? AND thread_id = ? AND version = ? AND state <> ? AND ${ACTIVE_REVIEW}`,
+    binds: [p.projectId, p.reviewKey, threadId, before.version, state, p.projectId, p.reviewKey],
+  };
+  const outcome = await commit(env, scope, digest, {
+    before: [
+      env.DB.prepare(
+        `INSERT INTO messages (project_id, review_key, thread_id, message_id, seq, author_key, author_name, exploring, body, created_at, via, transition, commit_sha, deployment_id)
+         SELECT ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages m WHERE m.project_id = ? AND m.review_key = ? AND m.thread_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ${state === 'resolved' ? LATEST_LIVE_DEPLOYMENT : 'NULL'}
+         WHERE EXISTS (${guard.sql})`,
+      ).bind(p.projectId, p.reviewKey, threadId, messageId, p.projectId, p.reviewKey, threadId, p.actor.key, p.actor.displayName, p.exploring ? JSON.stringify(p.exploring) : null, body, at, p.via, state, commitSha,
+        ...(state === 'resolved' ? [p.projectId, p.reviewKey] : []), ...guard.binds),
+      changeStatement(env, scope, threadId, `thread.${state}`, at, guard),
+      operationStatement(env, scope, digest, { messageId }, at, guard),
+    ],
+    mutation: env.DB.prepare(`UPDATE threads SET state = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND review_key = ? AND thread_id = ? AND version = ? AND state <> ? AND ${ACTIVE_REVIEW}`)
+      .bind(state, at, p.projectId, p.reviewKey, threadId, before.version, state, p.projectId, p.reviewKey),
+    after: [],
+  }, (replayed) => findMessage((replayed as { messageId: string }).messageId));
+  if (outcome.kind === 'replayed') return { created: false, message: outcome.result };
+  if (outcome.kind === 'not-written') {
+    await requireActive(env, p.projectId, p.reviewKey);
+    throw new HttpError(412, 'state_conflict', 'état modifié entre-temps : relire le fil puis réessayer');
+  }
+  return { created: true, message: await findMessage(messageId) };
 }

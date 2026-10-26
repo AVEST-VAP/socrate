@@ -1,11 +1,12 @@
-import { attachmentReservationSchema, captureCommitSchema, changesQuerySchema, issuesOf, threadListQuerySchema, MAX_CAPTURE_BYTES, newMessageSchema, newTargetedThreadSchema, newThreadSchema, sessionRequestSchema, stateChangeSchema, type Session } from '@socrate/contract';
+import { attachmentReservationSchema, captureCommitSchema, changesQuerySchema, deviceStartSchema, deviceTokenRequestSchema, issuesOf, threadListQuerySchema, MAX_CAPTURE_BYTES, newMessageSchema, newTargetedThreadSchema, newThreadSchema, reopenSchema, resolveSchema, sessionRequestSchema, stateChangeSchema, type Session } from '@socrate/contract';
 import type { z } from 'zod';
 import { ensureSchema, expectedSchema, readConfig, readInstance, type Env } from './env.ts';
 import { HttpError, errorResponse, json, readJson } from './http.ts';
 import { actorKey, authenticate, grantedCapabilities, randomToken, requireCapability, requireProject, tokenHash, verifyAssertion, type Principal } from './auth.ts';
 import { isConstraintViolation } from './d1.ts';
 import { deploymentOriginMatches, importDeployment, isRegisteredOrigin, readDeployment, readRevision, revokeDeployment } from './reviews.ts';
-import { getThread, listThreads, publish, reply, setState, type ParticipantScope } from './threads.ts';
+import { getThread, listThreads, publish, reply, setState, transition, type ParticipantScope, type WriterScope } from './threads.ts';
+import { decideDevice, deviceDetails, exchangeDevice, listAgents, revokeAgent, revokeSelf, startDevice } from './agents.ts';
 import { commitTargeted, readCapture, reclaimExpired, recognize, reserve, upload } from './captures.ts';
 import { revisionOf } from './wordings.ts';
 import { changesPage, listPage, listReviews } from './sync.ts';
@@ -30,10 +31,24 @@ async function corsHeaders(env: Env, request: Request): Promise<Record<string, s
   return headers;
 }
 
-function participant(p: Principal): ParticipantScope {
+/** `refused` dit ce qu'un agent délégué ne fait jamais : il répond, résout et rouvre, sans rien créer. */
+function participant(p: Principal, refused: string): ParticipantScope {
+  if (p.kind === 'agent') throw new HttpError(403, 'forbidden', `un agent délégué ne peut pas ${refused}`);
   if (p.kind !== 'session') throw new HttpError(403, 'forbidden', 'cette opération exige une session de relecteur');
   requireCapability(p, 'thread.participate');
-  return { projectId: p.projectId, reviewKey: p.reviewKey, deploymentId: p.deploymentId, actor: p.actor, exploring: p.exploring, capabilities: p.capabilities };
+  return { projectId: p.projectId, reviewKey: p.reviewKey, deploymentId: p.deploymentId, actor: p.actor, exploring: p.exploring, capabilities: p.capabilities, via: null };
+}
+
+/** Réponse et changement d'état avec message : session de relecteur, ou agent délégué au nom de son acteur réel. */
+function writer(p: Principal, reviewKey: string): WriterScope {
+  if (p.kind !== 'agent') return participant(p, '');
+  requireCapability(p, 'thread.participate');
+  return { projectId: p.projectId, reviewKey, deploymentId: null, actor: p.actor, exploring: null, capabilities: p.capabilities, via: p.agent };
+}
+
+/** Démarrage et échange servent aux outils : une page n'obtient jamais de jeton délégué. */
+function toolOnly(request: Request): void {
+  if (request.headers.get('Origin') !== null) throw new HttpError(403, 'forbidden', 'connexion d’agent refusée depuis une page web');
 }
 
 function idempotencyKey(request: Request): string {
@@ -132,6 +147,25 @@ async function route(env: Env, request: Request): Promise<Response> {
     });
   }
   if (seg[1] === 'auth' && seg[2] === 'session' && seg.length === 3 && method === 'POST') return createSession(env, request);
+  if (seg[1] === 'auth' && seg[2] === 'device' && seg.length === 3 && method === 'POST') {
+    toolOnly(request);
+    return json(await startDevice(env, await parsed(deviceStartSchema, request, 'démarrage invalide')), 201);
+  }
+  if (seg[1] === 'auth' && seg[2] === 'device' && seg[3] === 'token' && seg.length === 4 && method === 'POST') {
+    toolOnly(request);
+    return json(await exchangeDevice(env, (await parsed(deviceTokenRequestSchema, request, 'échange invalide')).deviceCode));
+  }
+  if (seg[1] === 'auth' && seg[2] === 'agent' && seg[3] === 'revoke' && seg.length === 4 && method === 'POST') return json(await revokeSelf(env, await authenticate(env, request)));
+  if (seg[1] === 'projects' && seg[2] && seg[3] === 'devices' && seg[4]) {
+    const principal = await authenticate(env, request);
+    if (seg.length === 5 && method === 'GET') return json(await deviceDetails(env, principal, seg[2], seg[4]));
+    if (seg.length === 6 && (seg[5] === 'approve' || seg[5] === 'deny') && method === 'POST') return json(await decideDevice(env, principal, seg[2], seg[4], seg[5] === 'approve'));
+  }
+  if (seg[1] === 'projects' && seg[2] && seg[3] === 'agents') {
+    const principal = await authenticate(env, request);
+    if (seg.length === 4 && method === 'GET') return json({ items: await listAgents(env, principal, seg[2]) });
+    if (seg.length === 6 && seg[4] && seg[5] === 'revoke' && method === 'POST') return json(await revokeAgent(env, principal, seg[2], seg[4]));
+  }
 
   if (seg[1] === 'projects' && seg[3] === 'purge' && seg[2] && seg.length === 4 && method === 'POST') {
     const principal = await authenticate(env, request);
@@ -183,7 +217,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         return readCapture(env, projectId, reviewKey, captureId);
       }
       if (seg.length === 7 && method === 'PUT') {
-        const scope = participant(principal);
+        const scope = participant(principal, 'téléverser une capture');
         const attempt = captureCommitSchema.safeParse({ attempt: url.searchParams.get('attempt') ?? '' });
         if (!attempt.success) throw new HttpError(422, 'invalid_request', 'paramètre attempt requis');
         if ((request.headers.get('Content-Type') ?? '') !== 'image/png') throw new HttpError(422, 'invalid_request', 'Content-Type image/png attendu');
@@ -195,14 +229,14 @@ async function route(env: Env, request: Request): Promise<Response> {
         return json({ uploaded: true }, 200);
       }
       if (seg[7] === 'commit' && seg.length === 8 && method === 'POST') {
-        const scope = participant(principal);
+        const scope = participant(principal, 'créer un fil');
         const body = await parsed(captureCommitSchema, request, 'validation invalide');
         const r = await commitTargeted(env, { scope, captureId, attempt: body.attempt });
         return json(r.thread, r.created ? 201 : 200);
       }
     }
     if (seg[5] === 'attachments' && seg.length === 6 && method === 'POST') {
-      const scope = participant(principal);
+      const scope = participant(principal, 'joindre une pièce');
       const key = idempotencyKey(request);
       const body = await parsed(attachmentReservationSchema, request, 'pièces jointes invalides');
       return json(await reserveAttachments(env, { scope, key, operation: body.operation, attachments: body.attachments }), 201);
@@ -213,7 +247,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         return readAttachment(env, projectId, reviewKey, seg[6]);
       }
       if (method === 'PUT') {
-        const scope = participant(principal);
+        const scope = participant(principal, 'joindre une pièce');
         const length = request.headers.get('Content-Length');
         // Une pièce par requête, lue en flux : jamais plusieurs vidéos en mémoire dans le Worker.
         await uploadAttachment(env, { scope, attachmentId: seg[6], contentType: request.headers.get('Content-Type') ?? '', declaredLength: length === null ? null : Number(length), body: request.body });
@@ -221,11 +255,11 @@ async function route(env: Env, request: Request): Promise<Response> {
       }
     }
     if (seg[5] === 'targeted' && seg.length === 6 && method === 'GET') {
-      const scope = participant(principal);
+      const scope = participant(principal, 'créer un fil');
       return json(await recognize(env, { scope, key: idempotencyKey(request) }));
     }
     if (seg[5] === 'targeted' && seg.length === 6 && method === 'POST') {
-      const scope = participant(principal);
+      const scope = participant(principal, 'créer un fil');
       const key = idempotencyKey(request);
       const payload = await parsed(newTargetedThreadSchema, request, 'retour ciblé invalide');
       const r = await reserve(env, { scope, key, payload });
@@ -245,7 +279,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         return json(await listPage(env, projectId, reviewKey, queryOf(threadListQuerySchema, url, 'paramètres de liste invalides'), reference));
       }
       if (seg.length === 6 && method === 'POST') {
-        const scope = participant(principal);
+        const scope = participant(principal, 'créer un fil ni proposer une formulation');
         const key = idempotencyKey(request);
         const body = await parsed(newThreadSchema, request, 'retour invalide');
         const r = await publish(env, { scope, key, body: body.body, proposal: body.proposal, attachments: body.attachments });
@@ -258,14 +292,24 @@ async function route(env: Env, request: Request): Promise<Response> {
         return json(await getThread(env, projectId, reviewKey, threadId, reference));
       }
       if (threadId && seg[7] === 'messages' && seg.length === 8 && method === 'POST') {
-        const scope = participant(principal);
+        const scope = writer(principal, reviewKey);
         const key = idempotencyKey(request);
         const body = await parsed(newMessageSchema, request, 'réponse invalide');
+        if (scope.via !== null && body.attachments?.length) throw new HttpError(403, 'forbidden', 'un agent délégué ne peut pas joindre une pièce');
         const r = await reply(env, { scope, key, threadId, body: body.body, attachments: body.attachments });
         return json(r.message, r.created ? 201 : 200);
       }
+      if (threadId && (seg[7] === 'resolve' || seg[7] === 'reopen') && seg.length === 8 && method === 'POST') {
+        const scope = writer(principal, reviewKey);
+        const key = idempotencyKey(request);
+        const body = seg[7] === 'resolve'
+          ? await parsed(resolveSchema, request, 'résolution invalide : message requis, commit facultatif')
+          : { ...(await parsed(reopenSchema, request, 'réouverture invalide : message requis')), commit: undefined };
+        const r = await transition(env, { scope, key, threadId, state: seg[7] === 'resolve' ? 'resolved' : 'open', body: body.message, commit: body.commit ?? null });
+        return json(r.message, r.created ? 201 : 200);
+      }
       if (threadId && seg[7] === 'state' && seg.length === 8 && method === 'PUT') {
-        const scope = participant(principal);
+        const scope = participant(principal, 'changer l’état sans message : utiliser …/resolve ou …/reopen');
         const key = idempotencyKey(request);
         const body = await parsed(stateChangeSchema, request, 'changement d’état invalide');
         const r = await setState(env, { scope, key, threadId, state: body.state, expectedVersion: body.expectedVersion });
@@ -299,6 +343,8 @@ export default {
     } catch (e) {
       const err = e instanceof HttpError ? e : new HttpError(500, 'persistence_uncertain', 'erreur interne', true);
       if (!(e instanceof HttpError)) console.error(requestId, e);
+      // Un corps JSON refusé avant lecture est lu avant la réponse : sinon la connexion réutilisée par le client peut être réinitialisée.
+      if (!request.bodyUsed && (request.headers.get('Content-Type') ?? '').startsWith('application/json')) await request.text().catch(() => undefined);
       return errorResponse(err, requestId, { ...cors, 'X-Request-Id': requestId });
     }
   },

@@ -10,7 +10,9 @@ export const BACKUP_TABLES = ['reviews', 'revisions', 'deployments', 'threads', 
 /** Tables du format 1, sans pièces jointes. */
 export const BACKUP_TABLES_V1 = ['reviews', 'revisions', 'deployments', 'threads', 'messages', 'captures', 'targets', 'proposals', 'operations', 'changes', 'consumed_assertions', 'purge_log'] as const;
 /** Migrations postérieures au format 1, toutes additives : une sauvegarde au format 1 se restaure sur ce schéma avec leurs tables vides. */
-export const ADDED_SINCE_V1 = ['0007_attachments.sql'] as const;
+export const ADDED_SINCE_V1 = ['0007_attachments.sql', '0008_agent_tokens.sql'] as const;
+/** Migrations additives postérieures aux premières sauvegardes au format 2 : tables non exportées et colonnes nulles, une sauvegarde sans elles se restaure. */
+export const ADDED_SINCE_V2 = ['0008_agent_tokens.sql'] as const;
 
 /** Extension du fichier d'objet de chaque type de pièce ; une capture garde `.png`. */
 export const OBJECT_EXTENSION: Record<AttachmentType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };

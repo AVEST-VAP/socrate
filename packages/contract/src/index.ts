@@ -5,3 +5,4 @@ export * from './html.ts';
 export * from './tokens.ts';
 export * from './config.ts';
 export * from './attachments.ts';
+export * from './device.ts';

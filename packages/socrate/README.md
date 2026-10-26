@@ -1,6 +1,6 @@
 # @meyer0x/socrate
 
-Everything a web app needs to host [Socrate](https://github.com/meyer0x/socrate) reviews in its pull request previews: a Vite plugin, the React review component and the CI commands. You write one `socrate.yml`, add the plugin, render the component behind a build-time flag, and add two CI steps. Production builds contain no Socrate code.
+Everything a web app needs to host [Socrate](https://github.com/meyer0x/socrate) reviews in its pull request previews: a Vite plugin, the React review component, the CI commands, and the commands your coding agent uses to read and answer the feedback ([For coding agents](#for-coding-agents)). You write one `socrate.yml`, add the plugin, render the component behind a build-time flag, and add two CI steps. Production builds contain no Socrate code.
 
 Requirements: a Socrate service you host ([self-host guide](https://github.com/meyer0x/socrate/blob/main/docs/self-host-cloudflare.md)), Vite, React 19, GitHub Actions, Node 20 or later in CI.
 
@@ -130,6 +130,8 @@ jobs:
           SOCRATE_IMPORT_TOKEN: ${{ secrets.SOCRATE_IMPORT_TOKEN }}
 ```
 
+In CI the package is installed as a dependency of your project (`npm ci`), so `npx socrate` runs its local bin. Outside such a project, write `npx @meyer0x/socrate`: the bare name `socrate` on npm belongs to an unrelated package.
+
 `socrate preview prepare --origin <origin>` reads the pull request labels live from the GitHub API (`GITHUB_TOKEN` or `GH_TOKEN`). Outside a `pull_request` event, or without the label, it writes the output `enabled=false` and nothing else: the build is a normal one. Otherwise it checks the origin against `previews`, writes `SOCRATE_PREVIEW` to `GITHUB_ENV` for the next steps, and sets the outputs `enabled=true`, `review` (the review key) and `deployment` (`pr-<number>-<head sha, 12 characters>-<run id>-<run attempt>`). Adding the label triggers a `labeled` run that builds the preview with Socrate; removing it triggers an `unlabeled` run that builds it without. Without `unlabeled`, the preview keeps Socrate until the next push.
 
 **Required checks.** A job skipped by its `if` reports success, and that result becomes the latest one of its check on the head commit. If this job is a required status check, adding an unrelated label to a pull request whose build failed would turn the check green. In that case, keep `labeled` and `unlabeled` out of this workflow and re-run its last run from a small workflow instead. A re-run gets a new run attempt, hence a new deployment, and `prepare` reads the labels again:
@@ -169,16 +171,54 @@ npx socrate check-absent dist
 
 Fails if a file of `dist` (source maps excluded) contains the client code of this package or the address of `service`. Run it after your production build.
 
+## For coding agents
+
+A coding agent (Claude Code, Codex…) reads the feedback of your pull request and answers it in your name. Connect it once per project and machine:
+
+```sh
+npx @meyer0x/socrate login            # inside Claude Code or Codex the agent is detected; otherwise --agent <name>
+```
+
+The command prints a code such as `KPXD-4821`. Open a preview of the project where you are signed in, choose **Plus d'options → Connecter un agent** in the Socrate toolbar, enter the code, check the agent and machine, and click **Autoriser**. Only approve a code you just requested. The agent can then, for 30 days, read every review of the project, reply, resolve and reopen threads; it cannot create threads. Its messages show "Your Name · via Claude". Revoke it under **Mes agents** in the panel, or with `npx @meyer0x/socrate logout`.
+
+A typical loop for the agent:
+
+```sh
+npx @meyer0x/socrate threads --json                          # open threads of the current branch's pull request
+npx @meyer0x/socrate thread <id> --captures .socrate --json  # messages, target (route, text, selector, HTML) and downloaded screenshot
+# … fix the code, commit …
+npx @meyer0x/socrate reply <id> "Moved the save button out of the modal."
+npx @meyer0x/socrate resolve <id> --message "Shortened the reminder label."   # links HEAD; --commit <sha> or --no-commit
+```
+
+- `service` and `project` come from `socrate.yml`, found as above, or `--config`.
+- The review is `--review <key>`, `--pr <number>` rendered with the `review` template, or by default the pull request of the current branch read with `gh`.
+- Tokens are stored in `$XDG_CONFIG_HOME/socrate/credentials.json` (default `~/.config/socrate/`, directory 0700, file 0600), one per service, project and agent, and are never printed. The agent of a command is `--agent`, else the one detected (`CLAUDECODE` for Claude Code, `CODEX_THREAD_ID` or `CODEX_SANDBOX` for Codex), else the only token stored for the project.
+- A message given as `-` is read from standard input.
+- Each write is one request with an idempotency key, retried with the same key after a lost answer. If the outcome is still unknown after the retries (network, 5xx, lost answer), the command exits with `1` and prints the key: `The reply may have been recorded. Run the command again with --key <key> so as not to duplicate it.` With `--json`, standard output holds `{ "outcome": "uncertain", "idempotencyKey": "<key>", "message": "…" }`. Run the same command with `--key <key>`: the service returns the first result instead of writing twice. Without `--key`, each command is a new write, even with the same message.
+- A token the service refuses with `401` (revoked or expired) is removed from the credentials file; run `npx @meyer0x/socrate login` again.
+- Readable output replaces control characters coming from the service (bodies, names, target, HTML) with `�`; `--json` keeps them as sent.
+- `--json` prints stable JSON, made for agents: the service's thread, message and list objects ([agent API](https://github.com/meyer0x/socrate/blob/main/docs/agent-api.md)).
+
 ## Commands
+
+`socrate` is the bin of this package: `npx socrate` inside a project that depends on it, `npx @meyer0x/socrate` anywhere else.
 
 ```
 socrate preview prepare --origin <origin of the preview> [--config socrate.yml]
 socrate preview register --url <deployed preview URL> [--config socrate.yml]
 socrate check-absent <build output directory> [--config socrate.yml]
+socrate login [--agent <name>] [--config socrate.yml] [--json]
+socrate logout [--agent <name>] [--config socrate.yml] [--json]
+socrate threads [--pr <n> | --review <key>] [--state open|resolved|all] [--agent <name>] [--json]
+socrate thread <id> [--pr <n> | --review <key>] [--captures <dir>] [--agent <name>] [--json]
+socrate reply <id> <message | -> [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
+socrate resolve <id> --message <text | -> [--commit <sha> | --no-commit] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
+socrate reopen <id> --message <text | -> [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
 socrate --version
 ```
 
-Exit codes: `0` success, `1` refusal or failure, `2` usage error.
+Exit codes: `0` success, `1` refusal by the service (its status, code and message are printed) or failure, `2` usage error (including a missing login or pull request).
 
 ## Without Vite, React or GitHub Actions
 

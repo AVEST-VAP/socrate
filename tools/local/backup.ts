@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { attachmentMetaSchema, SIGNATURE_BYTES, signatureMatches, issuesOf } from '@socrate/contract';
-import { ADDED_SINCE_V1, BACKUP_FORMAT, BACKUP_FORMAT_V1, BACKUP_TABLES, BACKUP_TABLES_V1, OBJECT_EXTENSION, backupManifestSchema, backupRowSchema, type BackupManifest } from '@socrate/contract/backup';
+import { ADDED_SINCE_V1, ADDED_SINCE_V2, BACKUP_FORMAT, BACKUP_FORMAT_V1, BACKUP_TABLES, BACKUP_TABLES_V1, OBJECT_EXTENSION, backupManifestSchema, backupRowSchema, type BackupManifest } from '@socrate/contract/backup';
 import { guardedPath, guardedTree, LocalRefusal, runtime } from './local-run.ts';
 const { listMigrations } = await runtime();
 import { Maintenance } from './maintenance.ts';
@@ -17,6 +17,9 @@ const EXPORTED_WHERE: Partial<Record<(typeof EXPORTED)[number], string>> = { cap
 const NOT_EXPORTED: Record<string, string> = {
   sessions: 'révoquées par construction : aucune session ne survit à la restauration',
   technical_credentials: 'révoqués par construction : la restauration émet de nouveaux accès locaux',
+  agent_tokens: 'jetons délégués révoqués par construction : chaque agent refait socrate login',
+  device_authorizations: 'codes de connexion d’agent, éphémères',
+  device_attempts: 'essais de codes, éphémères',
   listings: 'listes figées temporaires, invalidées par la nouvelle epoch',
   listing_items: 'listes figées temporaires',
   sync_epoch: 'renouvelée à la restauration : curseurs et marqueurs antérieurs en 410',
@@ -179,11 +182,14 @@ export async function verifyBackup(dir: string, expectedManifestSha256: string):
     if (sha(bytes) !== digest) throw new LocalRefusal('backup_altered', `${f} altéré : empreinte différente du manifeste`);
     read.set(f, bytes);
   }
-  // Format 1 : schéma du build sans les migrations additives ajoutées depuis, qui restent alors vides ; jamais un autre écart.
+  // Schéma du build, ou ce schéma sans les migrations additives ajoutées depuis le format, qui restent alors vides ; jamais un autre écart.
   const build = await listMigrations();
-  const expected = v1 ? build.filter((m) => !(ADDED_SINCE_V1 as readonly string[]).includes(m.id)) : build;
-  if (v1 && expected.length + ADDED_SINCE_V1.length !== build.length) throw new LocalRefusal('backup_schema', 'migrations additives du format 1 absentes du build : restauration refusée');
-  if (manifest.schema.map((m) => `${m.id}:${m.checksum}`).join() !== expected.map(({ id, checksum }) => `${id}:${checksum}`).join()) throw new LocalRefusal('backup_schema', `schéma de la sauvegarde (${manifest.format}) différent de celui du build : restauration refusée`);
+  const added: readonly string[] = v1 ? ADDED_SINCE_V1 : ADDED_SINCE_V2;
+  const older = build.filter((m) => !added.includes(m.id));
+  if (older.length + added.length !== build.length) throw new LocalRefusal('backup_schema', `migrations additives du format ${manifest.format} absentes du build : restauration refusée`);
+  const schemaText = (list: { id: string; checksum: string }[]) => list.map(({ id, checksum }) => `${id}:${checksum}`).join();
+  const accepted = v1 ? [schemaText(older)] : [schemaText(build), schemaText(older)];
+  if (!accepted.includes(schemaText(manifest.schema))) throw new LocalRefusal('backup_schema', `schéma de la sauvegarde (${manifest.format}) différent de celui du build : restauration refusée`);
   const tables = manifest.tables.map((t) => {
     const data = parseJson(read.get(t.file)!.toString('utf8'), t.file);
     if (!Array.isArray(data)) throw refuse(`${t.file} n’est pas une liste de lignes`);
@@ -248,7 +254,7 @@ export async function restoreBackup(m: Maintenance, dir: string, expectedManifes
   const { manifest, manifestSha256, tables, objects } = await verifyBackup(dir, expectedManifestSha256);
   const db = m.db;
   const bucket = m.bucket;
-  for (const name of [...EXPORTED, 'restorations', 'technical_credentials', 'sessions']) {
+  for (const name of [...EXPORTED, 'restorations', 'technical_credentials', 'sessions', 'agent_tokens']) {
     const n = (await db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).first<{ n: number }>())!.n;
     if (n > 0) throw new LocalRefusal('target_not_empty', `instance cible non vierge (${name} : ${n} ligne(s)) : restauration refusée, jamais substituée à une instance active`);
   }

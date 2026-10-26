@@ -72,6 +72,8 @@ Two steps in the pull request workflow, around your build and deploy steps (`on:
           SOCRATE_IMPORT_TOKEN: ${{ secrets.SOCRATE_IMPORT_TOKEN }}
 ```
 
+In CI, `npx socrate` runs the bin of the `@meyer0x/socrate` dependency installed by `npm ci`. Outside a project that installs it, write `npx @meyer0x/socrate`: the bare name `socrate` on npm belongs to an unrelated package.
+
 A pull request gets a Socrate preview when it carries the `socrate` label. Run `npx socrate check-absent dist` after your production build. If your preview headers set a Content-Security-Policy, add `csp: _headers` (or your headers file) to `socrate.yml`, and allow `style-src 'unsafe-inline'`. The backend route `/api/socrate/assertion` is the identity bridge of step 1 below. Every option, the CSP completion and the commands are in the [package README](../packages/socrate/README.md).
 
 ## 1. Identity bridge
