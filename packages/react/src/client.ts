@@ -525,7 +525,13 @@ export class ReviewClient {
       return seen;
     }
     const pieces = p.attachments.length ? { attachments: p.attachments.map((a) => a.meta) } : {};
-    const reserved = await this.transport('POST', `${this.base()}/targeted`, { kind: 'targeted', body: messageOf(p), target: p.target, image: p.image, ...(p.proposal && { proposal: p.proposal }), ...pieces }, { ...auth, 'Idempotency-Key': intent.key });
+    const reserve = (target: Target) => this.transport('POST', `${this.base()}/targeted`, { kind: 'targeted', body: messageOf(p), target, image: p.image, ...(p.proposal && { proposal: p.proposal }), ...pieces }, { ...auth, 'Idempotency-Key': intent.key });
+    let reserved = await reserve(p.target);
+    // Service antérieur au champ `container`, ou relevé refusé : la même charge sans lui, refusée avant toute écriture, donc sans conflit de clé.
+    if (reserved.status === 422 && ((await reserved.clone().json().catch(() => null)) as ApiError | null)?.issues?.every((i) => i.path.startsWith('target.container'))) {
+      const { container: _, ...target } = p.target;
+      reserved = await reserve(target);
+    }
     if (reserved.status !== 201) return reserved;
     const r = (await reserved.json()) as Reservation;
     if (!p.source.shared()) throw new CaptureLost();

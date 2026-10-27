@@ -3,7 +3,7 @@ import type { Message, Revision, ThreadWithMessages, Session } from '@socrate/co
 import type { TabCapture, CaptureStatus } from './capture.ts';
 import type { Cycle } from './guide.tsx';
 import { ReviewClient, isStaleTargeted, ownerOf, type Owner } from './client.ts';
-import { COMMENT_LABELS, MessageMedia, Notice, TARGETED_LABELS, describeCapture, describeTransition, useSubmission } from './conversation.tsx';
+import { COMMENT_LABELS, MessageMedia, Notice, TARGETED_LABELS, Transition, describeCapture, useSubmission } from './conversation.tsx';
 
 export type NavigationAdapter = { go(route: string): void; current(): string };
 
@@ -262,7 +262,7 @@ function ThreadView({ epoch, thread, client, navigation, revisionId, session, se
             <strong>{m.author.displayName}</strong>
             {m.via ? ` · via ${m.via}` : ''}
             {m.exploring ? ` (compte exploré : ${m.exploring.account})` : ''} · {formatDate(m.createdAt)}
-            {m.transition ? ` · ${describeTransition(m.transition)}` : ''}
+            {m.transition && <> · <Transition m={m} /></>}
           </div>
           <p>{m.body}</p>
           {m.attachments.length > 0 && <Suspense fallback={null}><MessageMedia client={client} attachments={m.attachments} /></Suspense>}
@@ -292,6 +292,8 @@ function Deferred({ label, load }: { label: string; load: () => Promise<ReactNod
 function TargetView({ epoch, thread, client, navigation }: { epoch: number; thread: ThreadWithMessages; client: ReviewClient; navigation: NavigationAdapter }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // « Voir où c’était » suit un échec de « Localiser la cible » dans le même cycle d'ouverture.
+  const [missedAt, setMissedAt] = useState<number | null>(null);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   const t = thread.target!;
   const c = thread.capture!;
@@ -307,7 +309,8 @@ function TargetView({ epoch, thread, client, navigation }: { epoch: number; thre
       {url ? <img src={url} alt={`Image prise au ciblage (${c.width} × ${c.height})`} data-testid="socrate-target-image" />
         : <button type="button" className="socrate-button link" onClick={() => client.captureBlob(c.captureId).then((b) => setUrl(URL.createObjectURL(b)), (e: Error) => setError(e.message))}>Afficher l’image</button>}
       {error && <p className="socrate-status" data-kind="error" role="alert">{error}</p>}
-      <Deferred key={epoch} label="Localiser la cible" load={() => { const c = cycle; return guide().then((g) => g.locateTarget(c, t, navigation)); }} />
+      <Deferred key={epoch} label="Localiser la cible" load={() => { const c = cycle; return guide().then((g) => g.locateTarget(c, t, navigation, (found) => setMissedAt(found ? null : epoch))); }} />
+      {missedAt === epoch && <Deferred key={`where-${epoch}`} label="Voir où c’était" load={() => import('./where.tsx').then((w) => <w.WhereView thread={thread} client={client} sameDeployment={thread.deploymentId === client.preview.deploymentId} />)} />}
     </div>
   );
 }

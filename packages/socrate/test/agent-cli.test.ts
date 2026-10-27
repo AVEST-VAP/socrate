@@ -147,9 +147,9 @@ test('threads, thread, reply, resolve et reopen au nom du dev, avec via, commit 
   assert.deepEqual([JSON.parse(r.stdout).body, JSON.parse(r.stdout).via, JSON.parse(r.stdout).author.displayName], ['Raccourci dans le commit suivant.', 'Claude', 'Karim Benali']);
   const res = await cli(['resolve', open, '--message', 'Corrigé.', '--review', REVIEW, '--agent', 'Claude']);
   assert.equal(res.code, 0, res.stderr);
-  assert.equal(res.stdout.trim(), `resolved ${open} as Karim Benali via Claude in ${head.slice(0, 7)} (deployment local-1)`, 'commit HEAD par défaut dans un dépôt Git');
+  assert.equal(res.stdout.trim(), `resolved ${open} as Karim Benali via Claude in ${head.slice(0, 7)} · waiting for the next preview`, 'commit HEAD par défaut dans un dépôt Git, jamais l’identifiant de déploiement');
   const read = await call(karim, 'GET', `${threadsPath}/${open}`);
-  assert.deepEqual(read.json.messages.at(-1).transition, { state: 'resolved', commit: head, deploymentId: 'local-1' });
+  assert.deepEqual(read.json.messages.at(-1).transition, { state: 'resolved', commit: head, deploymentId: 'local-1', liveSince: null, liveState: 'pending' });
   const again = await cli(['resolve', open, '--message', 'Encore.', '--review', REVIEW, '--agent', 'Claude']);
   assert.equal(again.code, 1, 'refus du service');
   assert.match(again.stderr, /the Socrate service refused the resolution: 409 state_conflict: retour déjà résolu/);
@@ -157,13 +157,16 @@ test('threads, thread, reply, resolve et reopen au nom du dev, avec via, commit 
   assert.equal(back.code, 0, back.stderr);
   assert.equal(back.stdout.trim(), `reopened ${open} as Karim Benali via Claude`);
   const bare = await cli(['resolve', open, '--message', 'Sans commit.', '--no-commit', '--review', REVIEW, '--agent', 'Claude', '--json']);
-  assert.deepEqual(JSON.parse(bare.stdout).transition, { state: 'resolved', commit: null, deploymentId: 'local-1' });
+  assert.deepEqual(JSON.parse(bare.stdout).transition, { state: 'resolved', commit: null, deploymentId: 'local-1', liveSince: null, liveState: null });
 
   const detail = await cli(['thread', open, '--review', REVIEW, '--agent', 'Claude']);
   assert.equal(detail.code, 0, detail.stderr);
   assert.match(detail.stdout, /\[2\] Karim Benali · via Claude · .*\n {4}Raccourci dans le commit suivant\./);
-  assert.match(detail.stdout, new RegExp(`\\[3\\] Karim Benali · via Claude · resolved in ${head.slice(0, 7)} \\(deployment local-1\\)`));
+  assert.match(detail.stdout, new RegExp(`\\[3\\] Karim Benali · via Claude · fixed in ${head.slice(0, 7)} · waiting for the next preview · \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC\\n`));
   assert.match(detail.stdout, /\[4\] Karim Benali · via Claude · reopened/);
+  assert.equal((await importDemo(bench, 'local-2', { commit: head })).status, 201);
+  const live = await cli(['thread', open, '--review', REVIEW, '--agent', 'Claude']);
+  assert.match(live.stdout, new RegExp(`\\[3\\] Karim Benali · via Claude · fixed in ${head.slice(0, 7)} · live since \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC · `), 'heures en UTC, sans redite de l’agent');
 
   for (const [args, pattern] of [
     [['resolve', open, '--review', REVIEW, '--agent', 'Claude'], /--message is required/],

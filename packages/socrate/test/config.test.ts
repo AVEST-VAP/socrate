@@ -143,5 +143,5 @@ test('package.json publié : ni private, ni scripts vers le workspace, ni dépen
   const published = publishedManifest(source);
   assert.deepEqual(['private', 'scripts', 'devDependencies'].filter((k) => k in published), []);
   assert.doesNotMatch(JSON.stringify(published), /\.\.\/|@socrate\//);
-  assert.deepEqual([published.name, published.version, published.files, published.publishConfig], ['@meyer0x/socrate', '0.2.0', ['dist', 'README.md'], { access: 'public' }]);
+  assert.deepEqual([published.name, published.version, published.files, published.publishConfig], ['@meyer0x/socrate', '0.3.0', ['dist', 'README.md'], { access: 'public' }]);
 });

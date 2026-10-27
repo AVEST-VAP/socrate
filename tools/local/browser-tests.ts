@@ -2086,6 +2086,8 @@ test('continuité A puis B sur une autre origine : A révoqué refusé, fils de 
 
     // Sur A : enfant éditorial localisé dans l'iframe sans quitter la vue scindée, principale éditoriale entourée, libre jamais confirmée.
     const threadA = (body: string) => panel(a).getByTestId('socrate-thread').filter({ hasText: body });
+    const whereOf = (t: ReturnType<typeof threadA>) => t.getByRole('button', { name: 'Voir où c’était' });
+    assert.equal(await whereOf(threadA(freeBody)).count(), 0, '« Voir où c’était » attend un échec de localisation');
     await threadA(childBody).getByRole('button', { name: 'Localiser la cible' }).click();
     const childFound = threadA(childBody).getByTestId('socrate-locate');
     await childFound.waitFor();
@@ -2111,11 +2113,17 @@ test('continuité A puis B sur une autre origine : A révoqué refusé, fils de 
     assert.equal(await mentionFound.getAttribute('data-resolution'), 'found');
     assert.equal(await a.locator('[data-socrate="highlight"]').count(), 1, 'nouvelle localisation dans le nouveau cycle');
     facts.reouvertureCible = { ...targetReopened, highlightsApres: 1 };
+    assert.equal(await whereOf(threadA(mentionBody)).count(), 0, 'cible localisée : pas de « Voir où c’était »');
     await threadA(freeBody).getByRole('button', { name: 'Localiser la cible' }).click();
     const freeA = threadA(freeBody).getByTestId('socrate-locate');
     await freeA.waitFor();
     assert.equal(await freeA.getAttribute('data-resolution'), 'indicative');
     assert.equal(await a.locator('[data-socrate="highlight"]').count(), 0, 'cible libre : aucun contour, même sur A');
+    await whereOf(threadA(freeBody)).click();
+    const whereA = threadA(freeBody).getByTestId('socrate-where');
+    assert.equal(await whereA.getByTestId('socrate-where-why').innerText(), 'L’élément n’est pas affiché sur cet écran pour le moment (fenêtre fermée, onglet, données différentes). Voici où il était quand le retour a été écrit.', 'même déploiement : élément non affiché');
+    assert.equal(await whereA.getByRole('button', { name: 'Réessayer' }).count(), 0, 'panneau : la localisation se relance par son propre bouton');
+    assert.doesNotMatch(await whereA.innerText(), /Réessayer/);
     await a.screenshot({ path: join(ARTIFACTS, 'continuite-a-publie.png') });
 
     const assembled = await assembleManifest(localPath('apps/demo/.socrate'));
@@ -2195,6 +2203,8 @@ test('continuité A puis B sur une autre origine : A révoqué refusé, fils de 
     assert.equal(await freeB.getAttribute('data-resolution'), 'indicative');
     assert.match(await freeB.innerText(), /Position indicative non confirmée/);
     assert.equal(await b.locator('[data-socrate="highlight"]').count(), 0, 'insertion devant une cible libre : aucun contour sur l’élément inséré');
+    await thread(freeBody).getByRole('button', { name: 'Voir où c’était' }).click();
+    assert.equal(await thread(freeBody).getByTestId('socrate-where').getByTestId('socrate-where-why').innerText(), 'Cette version de la page a changé : l’élément n’est pas retrouvé avec certitude. Voici où il était quand le retour a été écrit.', 'autre déploiement : la page a changé');
     await b.screenshot({ path: join(ARTIFACTS, 'continuite-b-libre-indicative.png') });
     // Charge antérieure simulée dans le stockage de test : la route de l'hôte est retirée du contexte enregistré.
     await own.service.db.prepare("UPDATE targets SET context = json_remove(context, '$.hostRoute') WHERE thread_id = (SELECT thread_id FROM messages WHERE body = ?)").bind(childBody).run();

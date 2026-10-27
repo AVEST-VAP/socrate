@@ -152,7 +152,8 @@ export async function followZone(cycle: Cycle, zone: Zone, navigation: Navigatio
   return r.kind === 'found' ? 'Élément mis en évidence dans l’application.' : r.kind === 'ambiguous' ? `Plusieurs éléments correspondent : aucun n’est mis en évidence. ${rest}` : `Élément absent de l’écran. ${rest}`;
 }
 
-export async function locateTarget(cycle: Cycle, t: Target, navigation: NavigationAdapter) {
+/** Localise la cible dans l'écran courant ; `onResult` reçoit faux quand elle n'y est pas confirmée (absente, ambiguë ou seulement indicative). */
+export async function locateTarget(cycle: Cycle, t: Target, navigation: NavigationAdapter, onResult?: (found: boolean) => void) {
   if (!cycle.alive) return null;
   const framed = !!t.frame?.length;
   // Une cible d'iframe navigue l'hôte par sa propre route ; une charge antérieure sans elle n'est pas devinée : l'écran courant seul est examiné.
@@ -176,6 +177,7 @@ export async function locateTarget(cycle: Cycle, t: Target, navigation: Navigati
   const text = where ?? (kind === 'found' ? 'Cible mise en évidence.'
     : kind === 'indicative' ? 'Position indicative non confirmée : la cible n’a pas d’identifiant éditorial propre, aucun élément n’est mis en évidence. Route, image et contexte d’origine font foi.'
     : kind === 'ambiguous' ? 'Cible ambiguë sur ce déploiement : elle n’est rattachée à aucun élément.' : 'Cible non localisable sur ce déploiement. Le retour et son image d’origine restent valables.');
+  onResult?.(kind === 'found');
   const legacy = framed && !t.hostRoute ? ' Retour antérieur sans route de l’hôte : seul l’écran courant est examiné.' : '';
   return <p className="socrate-meta" role="status" data-testid="socrate-locate" data-resolution={kind}>{text}{legacy}</p>;
 }

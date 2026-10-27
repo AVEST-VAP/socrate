@@ -1,6 +1,6 @@
 {
   "name": "@meyer0x/socrate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Socrate for host apps: Vite plugin, React review component, CI commands and coding-agent commands for in-preview product review.",
   "license": "MIT",

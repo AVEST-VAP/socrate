@@ -47,6 +47,22 @@ const isClickShield = (el: Element) => {
   const v = el.ownerDocument.defaultView!;
   return r.left <= 0 && r.top <= 0 && r.right >= v.innerWidth && r.bottom >= v.innerHeight;
 };
+/** Conteneur modal ou latéral de la cible ; son libellé : `aria-label`, `aria-labelledby` ou premier titre, texte normalisé tronqué à 80 unités UTF-16. */
+const MODAL = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+function containerOf(el: Element): Target['container'] {
+  const box = el.closest(MODAL);
+  if (!box) return undefined;
+  const named = box.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => box.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
+  const label = cleanText(box.getAttribute('aria-label') || named || box.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]')?.textContent || '').replace(/\p{C}/gu, '');
+  if (!label || label.length <= 80) return label ? { label } : {};
+  // Coupure par points de code, jamais au milieu d'une paire de substitution ; 80 unités UTF-16 au plus, comme le contrat.
+  let cut = '';
+  for (const c of label) {
+    if (cut.length + c.length > 79) break;
+    cut += c;
+  }
+  return { label: `${cut}…` };
+}
 const viewportOf = () => ({ width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio, scrollX: window.scrollX, scrollY: window.scrollY });
 const sameViewport = (a: Target['viewport'], b: Target['viewport']) => a.width === b.width && a.height === b.height && a.devicePixelRatio === b.devicePixelRatio && a.scrollX === b.scrollX && a.scrollY === b.scrollY;
 
@@ -330,11 +346,12 @@ export class TabCapture {
     const wording = el.closest('[data-socrate-wording]')?.getAttribute('data-socrate-wording');
     const selector = selectorOf(el);
     const context = contextOf(el, selector);
+    const container = containerOf(el);
     const target: Target = {
       url: loc.href.slice(0, 2048), route: loc.pathname.slice(0, 512) || '/', frame: frame ? [selectorOf(frame)] : [], ...(frame && { hostRoute: location.pathname.slice(0, 512) || '/' }),
       rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, viewport,
       role: roleOf(el), text: selection?.text ?? nearbyText(el), selector, html: sanitizedExcerpt(el),
-      ...(wording && /^[a-z0-9][a-z0-9-]{0,63}$/.test(wording) && { wording }), ...(context && { context }),
+      ...(wording && /^[a-z0-9][a-z0-9-]{0,63}$/.test(wording) && { wording }), ...(context && { context }), ...(container && { container }),
     };
     const launcher = document.querySelector(WITNESS)?.getBoundingClientRect() ?? null;
     try {

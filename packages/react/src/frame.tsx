@@ -15,6 +15,8 @@ import type { Status } from './panel.tsx';
 const Panel = lazy(() => import('./panel.tsx').then((m) => ({ default: m.Panel })));
 // Connexion et révocation des agents : chargées à l'ouverture de « Connecter un agent ».
 const AgentsView = lazy(() => import('./agents.tsx').then((m) => ({ default: m.AgentsView })));
+// Capture recadrée d'une cible non retrouvée : chargée à « Voir où c’était ».
+const WhereView = lazy(() => import('./where.tsx').then((m) => ({ default: m.WhereView })));
 
 const LIST_STYLE = { position: 'fixed', top: 0, right: 0, maxWidth: '100vw', height: '100vh', border: 'none', borderLeft: '1px solid #e4e4e7', boxShadow: '-8px 0 24px -12px rgb(0 0 0 / .12)', zIndex: 2147483000, background: '#fff' } as const;
 const BUBBLE_STYLE = { position: 'fixed', border: '1px solid #e4e4e7', borderRadius: 12, boxShadow: '0 12px 32px -8px rgb(0 0 0 / .2), 0 2px 6px rgb(0 0 0 / .05)', zIndex: 2147483002, background: '#fff', colorScheme: 'light' } as const;
@@ -28,8 +30,8 @@ const noSubscription = () => () => {};
 type Bubble = { kind: 'draft'; mode: 'comment' | 'correction'; at: Box } | { kind: 'thread'; threadId: string; at: Box } | { kind: 'cluster'; threadIds: string[]; at: Box };
 /** Menu Socrate posé dans le document de l'hôte : correction d'une sélection, ou actions d'une pastille. */
 type ContextMenu = { x: number; y: number; keyboard: boolean; restore: HTMLElement | null } & ({ kind: 'correction'; range: Range; frame: HTMLIFrameElement | null } | { kind: 'thread'; threadIds: string[] });
-/** Élément vivant d'un fil confirmé, avec le rôle et le texte relevés à la confirmation. */
-type Anchor = { element: WeakRef<Element>; frame: HTMLIFrameElement | null; role: string; text: string };
+/** Élément vivant d'un fil confirmé, avec le rôle et le texte relevés à la confirmation ; `probable` s'il a été retrouvé par son texte sur un autre déploiement. */
+type Anchor = { element: WeakRef<Element>; frame: HTMLIFrameElement | null; role: string; text: string; probable?: boolean };
 export type Actions = RefObject<((action: string, control: HTMLElement, event: Event) => void) | null>;
 
 const boxOf = (r: Box): Box => ({ x: r.x, y: r.y, width: r.width, height: r.height });
@@ -106,8 +108,8 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   }, []);
 
   const [listOpen, setListOpen] = useState(false);
-  // La liste affiche les agents à la place des conversations jusqu'au retour ou à sa fermeture.
-  const [agentsOpen, setAgentsOpen] = useState(false);
+  // La liste affiche les agents (`agents`), ou la capture d'un fil par son identifiant (« Voir où c’était »), à la place des conversations jusqu'au retour ou à sa fermeture.
+  const [aside, setAside] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [focusGeneral, setFocusGeneral] = useState(0);
   const [pref, setPref] = useState(storedWidth);
@@ -379,11 +381,12 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     if (!t.target) return null;
     const a = anchors.current.get(t.threadId);
     const el = a?.element.deref();
-    const kept = a && el && sameContext(el, a, t.target) ? { element: el, frame: a.frame } : null;
+    // Une position probable n'est pas gardée : elle est redemandée, et l'arrivée d'un jumeau la retire.
+    const kept = a && el && !a.probable && sameContext(el, a, t.target) ? { element: el, frame: a.frame } : null;
     if (kept) return kept;
     // Une ancre sortie de son contexte est remplacée par la cible de la règle de rechargement, revérifiée de même aux mutations suivantes.
-    const found = findTarget(t.target, t.deploymentId === preview.deploymentId);
-    if (found) anchors.current.set(t.threadId, { element: new WeakRef(found.element), frame: found.frame, role: roleOf(found.element), text: nearbyText(found.element) });
+    const found = findTarget(t.target, t.deploymentId === preview.deploymentId, !!t.proposal);
+    if (found) anchors.current.set(t.threadId, { element: new WeakRef(found.element), frame: found.frame, role: roleOf(found.element), text: nearbyText(found.element), probable: found.probable });
     else anchors.current.delete(t.threadId);
     return found;
   };
@@ -395,7 +398,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     }
     return m;
   }, [threads, domTick, anchorTick, routeTick, preview.deploymentId]);
-  const located = useMemo(() => new Set(spots.keys()), [spots]);
+  const located = useMemo(() => new Map([...spots].map(([id, s]) => [id, s.probable])), [spots]);
 
   const wide = typeof window !== 'undefined' && window.innerWidth >= LIST_WIDE;
   const paneWidth = wide ? listWidthOf(pref, innerWidth) : innerWidth;
@@ -464,18 +467,19 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const openThread = (threadId: string) => setExpanded((e) => (e === threadId ? null : threadId));
   const closeList = () => {
     setListOpen(false);
-    setAgentsOpen(false);
+    setAside(null);
     focusControl('launcher');
   };
 
   /**
    * « Voir sur la page » et « Aller à la page » : navigation explicite de l'hôte vers l'écran enregistré (route de l'hôte pour une iframe), même origine seulement, sauf s'il est déjà affiché.
    * La cible est ensuite localisée par la même règle que les pastilles ; absente ou ambiguë, le fil reste lisible dans la liste, sans élément de remplacement.
+   * `retry` : Réessayer de « Voir où c’était », qui reste affiché si la cible n'est toujours pas retrouvée. Rend vrai si elle l'est.
    */
-  const goTo = async (threadId: string) => {
+  const goTo = async (threadId: string, retry = false) => {
     const t = threads.find((x) => x.threadId === threadId);
     const screen = t?.target ? screenOf(t.target) : null;
-    if (!t || !screen || !sameOriginRoute(screen)) return;
+    if (!t || !screen || !sameOriginRoute(screen)) return false;
     setMenu(null);
     if (screen !== location.pathname) navigation.go(screen);
     const alive = { get alive() { return owner.current === client; } };
@@ -483,12 +487,14 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       const spot = spotOf(t);
       return spot ? { kind: 'found' as const, spot } : { kind: 'missing' as const };
     }, 120);
-    if (!alive.alive) return;
+    if (!alive.alive) return false;
     if (r.kind === 'missing') {
+      if (retry) return false;
       setListOpen(true);
       setExpanded(threadId);
-      return;
+      return false;
     }
+    setAside(null);
     // Écran large : la liste reste ouverte mais la ligne se replie, pour un seul composeur du fil.
     if (wide) setExpanded(null);
     else setListOpen(false);
@@ -496,6 +502,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     const box = rectOf(r.spot);
     opener.current = null;
     setBubble({ kind: 'thread', threadId, at: box ? boxOf(box) : CENTER() });
+    return true;
   };
 
   /** Action d'un fil depuis le menu de sa pastille ; mêmes entrées que sa ligne et ses boutons. */
@@ -745,11 +752,11 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     actions.current = (action, control, event) => {
       if (control.getAttribute('aria-disabled') === 'true') return;
       if (action === 'target') void startTargeting(control.dataset.retarget === 'true');
-      else if (action === 'launcher') { setMoreOpen(false); setAgentsOpen(false); setListOpen((o) => !o); }
-      else if (action === 'agents') { setMoreOpen(false); setAgentsOpen(true); setListOpen(true); }
+      else if (action === 'launcher') { setMoreOpen(false); setAside(null); setListOpen((o) => !o); }
+      else if (action === 'agents') { setMoreOpen(false); setAside('agents'); setListOpen(true); }
       else if (action === 'more') setMoreOpen((o) => !o);
       else if (action === 'close') closeAll();
-      else if (action === 'general') { setMoreOpen(false); setAgentsOpen(false); setListOpen(true); setFocusGeneral((n) => n + 1); }
+      else if (action === 'general') { setMoreOpen(false); setAside(null); setListOpen(true); setFocusGeneral((n) => n + 1); }
       else if (action === 'resize') { if (event.type === 'pointerdown') startResize(event as PointerEvent, control); }
       else if (action === 'pins') { setMoreOpen(false); setPinsHidden((h) => !h); }
       else if (action === 'stop') { setMoreOpen(false); captureRef.current?.deactivate(); }
@@ -820,6 +827,20 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   });
   const listRef = useRef<HTMLIFrameElement>(null);
   const listDoc = useFrameDoc(listRef, 'Revue Socrate');
+  const where = threads.find((t) => t.threadId === aside && t.target);
+  // Retour de « Voir où c’était » : le focus revient au bouton de la ligne d'origine, ou au titre de la liste si elle ne l'affiche plus.
+  const whereFrom = useRef<string | null>(null);
+  const backFromWhere = () => {
+    whereFrom.current = aside;
+    setAside(null);
+  };
+  useEffect(() => {
+    const id = whereFrom.current;
+    if (aside !== null || id === null) return;
+    whereFrom.current = null;
+    const row = listDoc?.ownerDocument.querySelector<HTMLElement>(`[data-testid="socrate-row"][data-thread="${CSS.escape(id)}"] [data-testid="socrate-missing"]`);
+    (row ?? headingRef.current)?.focus();
+  }, [aside]);
   const openCount = threads.filter((t) => t.state === 'open').length;
   const sharing = captureStatus.kind !== 'inactive';
   const captureNote = captureStatus.kind === 'inactive' && captureStatus.reason ? describeCapture(captureStatus) : captureStatus.kind === 'requesting' ? describeCapture(captureStatus) : null;
@@ -890,9 +911,10 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       )}
       {pins.map((g) => {
         const t = g[0]!.t;
-        const label = g.length > 1 ? `${g.length} conversations ici` : describeThread(t);
+        const probable = g.some((p) => located.get(p.t.threadId));
+        const label = `${probable ? 'Position probable · ' : ''}${g.length > 1 ? `${g.length} conversations ici` : describeThread(t)}`;
         return (
-          <button key={t.threadId} type="button" data-socrate="pin" data-socrate-action="pin" data-threads={g.map((p) => p.t.threadId).join(' ')} data-state={g.every((p) => p.t.state === 'resolved') ? 'resolved' : 'open'}
+          <button key={t.threadId} type="button" data-socrate="pin" data-socrate-action="pin" data-threads={g.map((p) => p.t.threadId).join(' ')} data-state={g.every((p) => p.t.state === 'resolved') ? 'resolved' : 'open'} data-probable={probable || undefined}
             aria-label={label} aria-haspopup="menu" aria-keyshortcuts="Shift+F10" data-socrate-tip={label} style={{ left: g[0]!.x, top: g[0]!.y, background: colorOf(t.author.key) }}>
             {initialsOf(t.author.displayName)}{g.length > 1 && <span data-count>{g.length}</span>}
           </button>
@@ -910,11 +932,13 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       {listDoc && createPortal(
         <Boundary>
           {!editorial && <Tip doc={listDoc.ownerDocument} />}
-          {agentsOpen
-            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><AgentsView client={client} onBack={() => setAgentsOpen(false)} onClose={closeList} headingRef={headingRef} /></Suspense>
+          {aside === 'agents' || where
+            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}>{where
+              ? <WhereView key={aside} thread={where} client={client} sameDeployment={where.deploymentId === preview.deploymentId} onBack={backFromWhere} onClose={closeList} onRetry={() => goTo(aside!, true)} headingRef={headingRef} />
+              : <AgentsView client={client} onBack={() => setAside(null)} onClose={closeList} headingRef={headingRef} />}</Suspense>
             : editorial
             ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><Panel client={client} capture={capture} navigation={navigation} visible={listOpen} onClose={closeList} revision={revision} threads={threads} status={status} refresh={refresh} /></Suspense>
-            : <ConversationList review={review} title={revision?.manifest.title ?? null} status={status} route={route} located={located} expanded={expanded} onOpen={openThread} onGoto={(id) => void goTo(id)} onClose={closeList} headingRef={headingRef} generalRef={generalRef} />}
+            : <ConversationList review={review} title={revision?.manifest.title ?? null} status={status} route={route} located={located} expanded={expanded} onOpen={openThread} onGoto={(id) => void goTo(id)} onWhere={setAside} onClose={closeList} headingRef={headingRef} generalRef={generalRef} />}
         </Boundary>,
         listDoc,
       )}

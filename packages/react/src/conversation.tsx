@@ -204,9 +204,24 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
   );
 }
 
-/** « Résolu dans abc1234 » ou « Rouvert », avec le déploiement relevé à la résolution, pour un changement d'état écrit avec son message. */
-export const describeTransition = (t: NonNullable<Message['transition']>) =>
-  `${t.state === 'resolved' ? `Résolu${t.commit ? ` dans ${t.commit.slice(0, 7)}` : ''}` : 'Rouvert'}${t.deploymentId ? ` · déploiement ${t.deploymentId}` : ''}`;
+/** Heure du jour même, sinon date courte : « 11 h 24 », « 27 oct. ». */
+const shortWhen = (iso: string) => {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString('fr-FR', { timeStyle: 'short' }).replace(':', ' h ') : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+};
+/**
+ * Changement d'état écrit avec son message, sans identifiant de déploiement : « Corrigé par Claude · en ligne depuis 11 h 24 » quand un agent donne un commit déployé,
+ * « · en attente de la prochaine preview » seulement si aucun déploiement n'a suivi la résolution, rien d'autre sinon ou face à un service antérieur ;
+ * sans commit, « Résolu par » l'agent ou la personne ; ou « Rouvert ». Le commit court reste au survol.
+ */
+export function Transition({ m }: { m: Message }) {
+  const { state, commit, liveSince: live, liveState } = m.transition!;
+  return (
+    <span data-testid="socrate-transition" data-live={(commit && liveState) || undefined} title={commit ? `Commit ${commit.slice(0, 7)}` : undefined}>
+      {state === 'open' ? 'Rouvert' : m.via && commit ? `Corrigé par ${m.via}${live ? ` · en ligne depuis ${shortWhen(live)}` : liveState === 'pending' ? ' · en attente de la prochaine preview' : ''}` : `Résolu par ${m.via ?? m.author.displayName}`}
+    </span>
+  );
+}
 
 function MessageView({ m, client }: { m: Message; client: ReviewClient }) {
   return (
@@ -216,7 +231,7 @@ function MessageView({ m, client }: { m: Message; client: ReviewClient }) {
         <strong title={m.exploring ? `Compte exploré : ${m.exploring.account}` : undefined}>{m.author.displayName}</strong>
         {m.via && <span className="socrate-meta" data-testid="socrate-via">· via {m.via} </span>}
         <When iso={m.createdAt} />
-        {m.transition && <p className="socrate-meta" data-testid="socrate-transition">{describeTransition(m.transition)}</p>}
+        {m.transition && <p className="socrate-meta"><Transition m={m} /></p>}
         <p>{m.body}</p>
         {m.attachments.length > 0 && <Suspense fallback={null}><MessageMedia client={client} attachments={m.attachments} /></Suspense>}
       </div>
@@ -338,9 +353,9 @@ const STATE_NAMES: Record<StateFilter, string> = { open: 'Ouvertes', resolved: '
  * Les commentaires généraux portent sur la revue : présents dans les deux portées. Une ligne ouvre son fil en place, localisé ou non ;
  * « Voir sur la page » ou « Aller à la page » retrouve sa cible séparément.
  */
-export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onClose, headingRef, generalRef }: {
-  review: Review; title: string | null; status: Status; route: string; located: Set<string>; expanded: string | null;
-  onOpen: (threadId: string) => void; onGoto: (threadId: string) => void; onClose: () => void;
+export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onWhere, onClose, headingRef, generalRef }: {
+  review: Review; title: string | null; status: Status; route: string; located: Map<string, boolean | undefined>; expanded: string | null;
+  onOpen: (threadId: string) => void; onGoto: (threadId: string) => void; onWhere: (threadId: string) => void; onClose: () => void;
   headingRef: RefObject<HTMLHeadingElement | null>; generalRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const { client, session, seen, threads, refresh, canParticipate } = review;
@@ -448,16 +463,16 @@ export function ConversationList({ review, title, status, route, located, expand
                         {pieces(t) > 0 && <span>{ICON.attach}{pieces(t)}<span className="socrate-visually-hidden"> pièce{pieces(t) > 1 ? 's' : ''} jointe{pieces(t) > 1 ? 's' : ''}</span></span>}
                         {t.state === 'resolved' && <span className="socrate-tag">Résolue</span>}
                         {!t.target ? <span className="socrate-tag">Général</span>
-                          : !onScreen ? <span data-testid="socrate-elsewhere">{page ? `Autre page · ${page}` : 'Écran inconnu'}</span>
-                          : !located.has(t.threadId) && <span data-testid="socrate-missing">Élément introuvable sur cet écran</span>}
+                          : !onScreen && <span data-testid="socrate-elsewhere">{page ? `Autre page · ${page}` : 'Écran inconnu'}</span>}
                       </span>
                     </span>
                   </button>
                   <button type="button" className="socrate-icon" aria-label={`Actions de la conversation de ${t.author.displayName}`} data-socrate-tip="Plus d’actions" aria-haspopup="menu"
                     aria-expanded={menu?.threadId === t.threadId} onClick={(e) => (menu?.threadId === t.threadId ? closeMenu(true) : openMenu(t, e.currentTarget))}>{ICON.more}</button>
                 </div>
-                {onScreen ? located.has(t.threadId) && <button type="button" className="socrate-button link socrate-goto" onClick={() => onGoto(t.threadId)}>Voir sur la page</button>
-                  : page && <button type="button" className="socrate-button link socrate-goto" onClick={() => onGoto(t.threadId)}>Aller à la page</button>}
+                {!t.target ? null : !onScreen ? page && <button type="button" className="socrate-button link socrate-goto" onClick={() => onGoto(t.threadId)}>Aller à la page</button>
+                  : located.has(t.threadId) ? <span className="socrate-goto socrate-meta" data-testid="socrate-located"><button type="button" className="socrate-button link" onClick={() => onGoto(t.threadId)}>Voir sur la page</button>{located.get(t.threadId) && ' · position probable'}</span>
+                  : <button type="button" className="socrate-button link socrate-goto" data-testid="socrate-missing" onClick={() => onWhere(t.threadId)}>Voir où c’était</button>}
                 {!open && <RowState thread={t} review={review} />}
                 {open && <div className="socrate-inline"><Conversation thread={t} review={review} /></div>}
               </li>

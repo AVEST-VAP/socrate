@@ -36,10 +36,27 @@ const toThread = (r: ThreadRow, target: TargetRow | undefined, proposal: Proposa
   capture: target ? { captureId: target.capture_id, status: 'available', contentType: target.content_type, size: target.size, sha256: target.sha256, width: target.width, height: target.height } : null,
   proposal: proposal ? toProposal(proposal, reference) : null,
 });
-const toMessage = (r: MessageRow, attachments: Attachment[] = []): Message => ({
+/** Déploiements non révoqués de la revue, du plus ancien au plus récent : ce qu'il faut pour dire si un commit de résolution est en ligne. */
+type LiveRow = { deployment_id: string; commit_sha: string; created_at: string };
+const LIVE_SQL = 'SELECT deployment_id, commit_sha, created_at FROM deployments WHERE project_id = ? AND review_key = ? AND revoked_at IS NULL ORDER BY created_at, deployment_id';
+const liveDeployments = async (env: Env, projectId: string, reviewKey: string) => (await env.DB.prepare(LIVE_SQL).bind(projectId, reviewKey).all<LiveRow>()).results;
+/**
+ * Mise en ligne d'une résolution avec commit. `liveSince` : premier déploiement qui porte le commit, abrégé ou complet de part et d'autre, comparé par préfixe dans les deux sens.
+ * Sinon `pending` tant qu'aucun déploiement n'a été créé depuis la résolution (celui relevé à l'écriture exclu), `unknown` ensuite : un build postérieur peut contenir
+ * le correctif sous un autre commit, et le service ne connaît aucune ascendance Git. Rien sans commit.
+ */
+function liveOf(live: LiveRow[], r: MessageRow): Pick<Transition, 'liveSince' | 'liveState'> {
+  const commit = r.commit_sha;
+  if (!commit) return { liveSince: null, liveState: null };
+  const since = live.find((d) => d.commit_sha.startsWith(commit) || commit.startsWith(d.commit_sha))?.created_at ?? null;
+  if (since) return { liveSince: since, liveState: 'live' };
+  return { liveSince: null, liveState: live.some((d) => d.deployment_id !== r.deployment_id && d.created_at >= r.created_at) ? 'unknown' : 'pending' };
+}
+
+const toMessage = (r: MessageRow, attachments: Attachment[] = [], live: LiveRow[] = []): Message => ({
   messageId: r.message_id, threadId: r.thread_id, seq: r.seq, author: { key: r.author_key, displayName: r.author_name },
   exploring: r.exploring ? JSON.parse(r.exploring) : null, body: r.body, attachments, via: r.via,
-  transition: r.transition ? { state: r.transition, commit: r.commit_sha, deploymentId: r.deployment_id } : null, createdAt: r.created_at,
+  transition: r.transition ? { state: r.transition, commit: r.commit_sha, deploymentId: r.deployment_id, ...liveOf(live, r) } : null, createdAt: r.created_at,
 });
 const byMessage = (rows: AttachmentRow[]) => {
   const m = new Map<string, Attachment[]>();
@@ -57,20 +74,22 @@ export const asThread = (stored: Json): ThreadWithMessages => {
 export async function listThreads(env: Env, projectId: string, reviewKey: string, reference: RevisionRef | null, ids?: string[]): Promise<ThreadWithMessages[]> {
   const only = (column: string) => (ids ? ` AND ${column} IN (SELECT value FROM json_each(?))` : '');
   const binds = ids ? [projectId, reviewKey, JSON.stringify(ids)] : [projectId, reviewKey];
-  const [threads, messages, targets, proposals, attachments] = await env.DB.batch([
+  const [threads, messages, targets, proposals, attachments, live] = await env.DB.batch([
     env.DB.prepare(`SELECT * FROM threads WHERE project_id = ? AND review_key = ?${only('thread_id')} ORDER BY created_at, thread_id`).bind(...binds),
     env.DB.prepare(`SELECT * FROM messages WHERE project_id = ? AND review_key = ?${only('thread_id')} ORDER BY thread_id, seq`).bind(...binds),
     env.DB.prepare(`${TARGET_SQL} WHERE t.project_id = ? AND t.review_key = ?${only('t.thread_id')}`).bind(...binds),
     env.DB.prepare(`SELECT * FROM proposals WHERE project_id = ? AND review_key = ?${only('thread_id')}`).bind(...binds),
     env.DB.prepare(`${ATTACHED_SQL}${only('thread_id')} ORDER BY message_id, position`).bind(...binds),
+    env.DB.prepare(LIVE_SQL).bind(projectId, reviewKey),
   ]);
+  const deployments = live!.results as LiveRow[];
   const piecesOf = byMessage(attachments!.results as AttachmentRow[]);
   const targetOf = new Map((targets!.results as TargetRow[]).map((t) => [t.thread_id, t]));
   const proposalOf = new Map((proposals!.results as ProposalRow[]).map((p) => [p.thread_id, p]));
   const byThread = new Map<string, Message[]>();
   for (const m of (messages!.results as MessageRow[])) {
     const list = byThread.get(m.thread_id) ?? [];
-    list.push(toMessage(m, piecesOf.get(m.message_id)));
+    list.push(toMessage(m, piecesOf.get(m.message_id), deployments));
     byThread.set(m.thread_id, list);
   }
   const rows = threads!.results as ThreadRow[];
@@ -88,7 +107,8 @@ export async function getThread(env: Env, projectId: string, reviewKey: string, 
   const target = await env.DB.prepare(`${TARGET_SQL} WHERE t.project_id = ? AND t.review_key = ? AND t.thread_id = ?`).bind(projectId, reviewKey, threadId).first<TargetRow>();
   const proposal = await env.DB.prepare('SELECT * FROM proposals WHERE project_id = ? AND review_key = ? AND thread_id = ?').bind(projectId, reviewKey, threadId).first<ProposalRow>();
   const pieces = byMessage((await env.DB.prepare(`${ATTACHED_SQL} AND thread_id = ? ORDER BY message_id, position`).bind(projectId, reviewKey, threadId).all<AttachmentRow>()).results);
-  return { ...toThread(t, target ?? undefined, proposal ?? undefined, reference), messages: m.results.map((r) => toMessage(r, pieces.get(r.message_id))) };
+  const live = await liveDeployments(env, projectId, reviewKey);
+  return { ...toThread(t, target ?? undefined, proposal ?? undefined, reference), messages: m.results.map((r) => toMessage(r, pieces.get(r.message_id), live)) };
 }
 
 type OperationKind = 'thread.create' | 'thread.targeted' | 'message.create' | 'thread.state' | 'thread.transition';
@@ -297,7 +317,7 @@ export async function transition(env: Env, input: { scope: WriterScope; key: str
   const findMessage = async (messageId: string) => {
     const row = await env.DB.prepare('SELECT * FROM messages WHERE project_id = ? AND review_key = ? AND thread_id = ? AND message_id = ?').bind(p.projectId, p.reviewKey, threadId, messageId).first<MessageRow>();
     if (!row) throw uncertain('résultat introuvable');
-    return toMessage(row);
+    return toMessage(row, [], await liveDeployments(env, p.projectId, p.reviewKey));
   };
   const stored = await recordedResult(env, scope, digest);
   if (stored !== null) return { created: false, message: await findMessage((stored as { messageId: string }).messageId) };

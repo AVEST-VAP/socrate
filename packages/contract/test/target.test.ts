@@ -33,3 +33,11 @@ test('cible : contexte facultatif borné et assaini, absent des charges antérie
     assert.equal(targetSchema.safeParse({ ...base, context: bad }).success, false, JSON.stringify(bad));
   }
 });
+
+test('cible : fenêtre contenante facultative, libellé texte borné, absente des charges antérieures', () => {
+  for (const container of [{ label: 'Modèle de rappel court' }, {}]) assert.deepEqual(targetSchema.parse({ ...base, container }), { ...base, container });
+  assert.ok(!('container' in targetSchema.parse(base)), 'aucun défaut injecté dans un ancien retour');
+  for (const bad of [{ label: 'x'.repeat(81) }, { label: 'ligne\nsuivante' }, { label: 'a', kind: 'dialog' }, 'dialog']) {
+    assert.equal(targetSchema.safeParse({ ...base, container: bad }).success, false, JSON.stringify(bad));
+  }
+});

@@ -182,14 +182,25 @@ async function commitOf(ctx: Ctx): Promise<string | null> {
 }
 
 const base = (ctx: Ctx, review: string) => `/v1/projects/${encodeURIComponent(ctx.config.project)}/reviews/${encodeURIComponent(review)}`;
-const short = (iso: string) => iso.slice(0, 16).replace('T', ' ');
+const short = (iso: string) => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
 const line = (t: string) => t.replace(/\s+/g, ' ').trim();
 const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
+/** Live state of a fix, as in the panel: "live since …" once a deployment carries the commit, "waiting" only while no deployment followed the resolution. */
+function liveNote(t: NonNullable<Message['transition']>): string {
+  return t.liveSince ? ` · live since ${short(t.liveSince)}` : t.liveState === 'pending' ? ' · waiting for the next preview' : '';
+}
+
+/** Same wording as the panel, without deployment id: "fixed in abc1234 · live since …" when an agent gave a commit, otherwise "resolved" or "reopened"; the author and agent are already on the line. */
+function describeTransition(m: Message): string {
+  const t = m.transition!;
+  if (t.state === 'open') return 'reopened';
+  return m.via && t.commit ? `fixed in ${t.commit.slice(0, 7)}${liveNote(t)}` : 'resolved';
+}
+
 function describeMessage(m: Message): string {
   const who = `${m.author.displayName}${m.via ? ` · via ${m.via}` : ''}`;
-  const state = m.transition ? ` · ${m.transition.state === 'resolved' ? `resolved${m.transition.commit ? ` in ${m.transition.commit.slice(0, 7)}` : ''}${m.transition.deploymentId ? ` (deployment ${m.transition.deploymentId})` : ''}` : 'reopened'}` : '';
-  return `${who}${state} · ${short(m.createdAt)}`;
+  return `${who}${m.transition ? ` · ${describeTransition(m)}` : ''} · ${short(m.createdAt)}`;
 }
 
 async function login(ctx: Ctx): Promise<void> {
@@ -329,7 +340,7 @@ async function transition(ctx: Ctx, id: string | undefined, state: 'resolve' | '
   const commit = state === 'resolve' ? await commitOf(ctx) : null;
   const review = await reviewKey(ctx);
   const m = await write<Message>(ctx, `the ${state === 'resolve' ? 'resolution' : 'reopening'}`, `${base(ctx, review)}/threads/${encodeURIComponent(id)}/${state}`, t.token, { message, ...(commit && { commit }) });
-  ctx.out(`${state === 'resolve' ? 'resolved' : 'reopened'} ${id} as ${m.author.displayName} via ${m.via}${m.transition?.commit ? ` in ${m.transition.commit.slice(0, 7)}` : ''}${m.transition?.deploymentId ? ` (deployment ${m.transition.deploymentId})` : ''}`, m);
+  ctx.out(`${state === 'resolve' ? 'resolved' : 'reopened'} ${id} as ${m.author.displayName} via ${m.via}${m.transition?.commit ? ` in ${m.transition.commit.slice(0, 7)}${liveNote(m.transition)}` : ''}`, m);
 }
 
 export async function runAgent(command: string, argv: string[], io: Io): Promise<void> {

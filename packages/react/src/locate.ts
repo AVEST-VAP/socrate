@@ -114,7 +114,8 @@ export function currentSelection(): { range: Range; frame: HTMLIFrameElement | n
   return null;
 }
 
-export type Spot = { element: Element; frame: HTMLIFrameElement | null };
+/** `probable` : retrouvée par son texte sur un autre déploiement, affichée comme position probable. */
+export type Spot = { element: Element; frame: HTMLIFrameElement | null; probable?: boolean };
 type Context = NonNullable<Target['context']>;
 
 const sameRole = (el: Element, t: Target) => roleOf(el) === t.role && nearbyText(el) === t.text;
@@ -211,15 +212,80 @@ export function contextOf(el: Element, selector: string): Target['context'] {
 /** Un seul candidat retenu, jamais le premier d'un ensemble. */
 const only = (hits: Element[]) => (hits.length === 1 ? hits[0]! : null);
 
+/** Texte propre : nœuds texte de l'élément hors balises retirées par l'assainissement, sans lecture du rendu. Même lecture pour l'extrait enregistré et pour un candidat. */
+function ownText(root: Node): string {
+  const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.nodeType === Node.TEXT_NODE ? NodeFilter.FILTER_ACCEPT : (n as Element).matches(DROPPED) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP),
+  });
+  let text = '';
+  while (walker.nextNode()) text += walker.currentNode.nodeValue;
+  return text;
+}
+
+const MIN_TEXT = 12;
+const MAX_TEXT = 500;
+const references = new WeakMap<Target, string>();
+/** Texte de référence d'une cible : texte propre de l'extrait enregistré au ciblage (`html`), espaces compactés, 500 caractères au plus ; jamais `text`, qui peut être une sélection ou le texte d'un parent. */
+function referenceOf(t: Target): string {
+  let text = references.get(t);
+  if (text === undefined) {
+    const parsed = document.createElement('template');
+    parsed.innerHTML = t.html;
+    text = cleanText(ownText(parsed.content)).slice(0, MAX_TEXT);
+    references.set(t, text);
+  }
+  return text;
+}
+
+/** Lectures partagées par les fils d'une même passe (une tâche, sans mutation possible entre deux fils) ; oubliées à la microtâche suivante. */
+let pass: { candidates: Map<Document, Map<string, Element[] | null>>; flat: Map<Element, string> } | null = null;
+function currentPass() {
+  if (!pass) {
+    pass = { candidates: new Map(), flat: new Map() };
+    queueMicrotask(() => { pass = null; });
+  }
+  return pass;
+}
+
+/**
+ * Seul élément de même balise (celle qui ouvre l'extrait) et même rôle, hors Socrate, dont le texte propre commence par le texte de référence entier
+ * (`referenceOf`, 12 caractères au moins : en deçà, un libellé comme « Modifier » n'identifie rien). Casse conservée : extrait et candidat sont lus
+ * dans le DOM, hors CSS, une majuscule changée est une édition. Une cible sans texte propre n'est pas relocalisée.
+ * Coût borné : au-delà de `MAX_CANDIDATES` éléments de même balise et même rôle, refus ; le texte propre n'est lu que sur ceux dont `textContent`,
+ * sans espaces, contient la référence sans espaces. Les éléments masqués comptent pour l'ambiguïté, mais un candidat unique non rendu n'est pas retenu.
+ */
+function byText(doc: Document, t: Target): Element | null {
+  const tag = /^<([\w-]+)/.exec(t.html)?.[1];
+  const text = referenceOf(t);
+  if (!tag || text.length < MIN_TEXT) return null;
+  const p = currentPass();
+  const key = `${tag}\n${t.role}`;
+  const byDoc = p.candidates.get(doc) ?? p.candidates.set(doc, new Map()).get(doc)!;
+  let same = byDoc.get(key);
+  if (same === undefined) {
+    const all = [...doc.getElementsByTagName(tag)].filter((el) => roleOf(el) === t.role);
+    byDoc.set(key, same = all.length > MAX_CANDIDATES ? null : all.filter((el) => !isSocrate(el)));
+  }
+  if (!same) return null;
+  const compact = text.replace(/\s/g, '');
+  const flat = (el: Element) => p.flat.get(el) ?? p.flat.set(el, el.textContent!.replace(/\s/g, '')).get(el)!;
+  const hit = only(same.filter((el) => flat(el).includes(compact) && cleanText(ownText(el)).startsWith(text)));
+  return hit && hit.getClientRects().length > 0 && hit.checkVisibility({ visibilityProperty: true }) ? hit : null;
+}
+
 /**
  * Cible d'une pastille après navigation, remontage ou rechargement, sans élément vivant retenu :
  * même route et même cadre ; identifiant éditorial propre et unique ; sinon, sur le même déploiement seulement :
  * avec un contexte enregistré, un seul candidat de même structure au même chemin sous un ancêtre identique, sans repli ;
  * sans contexte (retour antérieur ou cible non distinguée), la règle historique, puis un seul candidat dont la sérialisation complète
  * égale l'extrait enregistré et que le sélecteur d'origine désigne encore : un jumeau ne reprend pas la pastille d'une cible supprimée.
+ * Sur un autre déploiement, sans identifiant éditorial : un seul élément de même balise et même rôle dont le texte propre commence par le texte propre
+ * entier de l'extrait enregistré (`byText`), rendu et rendu `probable` ; le sélecteur positionnel d'un autre build ne désigne plus rien de sûr.
+ * Une cible issue d'une sélection (`selection`, fil portant une proposition) ou sans texte propre n'est jamais relocalisée ainsi.
+ * L'appelant ne garde pas une position probable d'une mutation à l'autre : il la redemande, et un jumeau apparu la retire.
  * Tout autre cas rend null : aucune pastille n'est posée sur un élément arbitraire.
  */
-export function findTarget(t: Target, sameDeployment: boolean): Spot | null {
+export function findTarget(t: Target, sameDeployment: boolean, selection = false): Spot | null {
   let frame: HTMLIFrameElement | null = null;
   let doc = document;
   if (t.frame?.length) {
@@ -240,7 +306,10 @@ export function findTarget(t: Target, sameDeployment: boolean): Spot | null {
     const r = resolveEditorial(doc, own[2] ? { id: own[1]!, instance: own[2] } : { id: own[1]! });
     return r.kind === 'found' ? { element: r.element, frame } : null;
   }
-  if (!sameDeployment) return null;
+  if (!sameDeployment) {
+    const hit = selection ? null : byText(doc, t);
+    return hit && { element: hit, frame, probable: true };
+  }
   const spot = (el: Element | null) => (el ? { element: el, frame } : null);
   const family = () => familyOf(doc, t.selector) ?? [];
   if (t.context) return spot(only(family().filter((el) => inContext(el, t.context!))));
