@@ -1,8 +1,8 @@
 # @meyer0x/socrate
 
-Everything a web app needs to host [Socrate](https://github.com/meyer0x/socrate) reviews in its pull request previews: a Vite plugin, the React review component, the CI commands, and the commands your coding agent uses to read and answer the feedback ([For coding agents](#for-coding-agents)). You write one `socrate.yml`, add the plugin, render the component behind a build-time flag, and add two CI steps. Production builds contain no Socrate code.
+Everything a web app needs to host [Socrate](https://github.com/AVEST-VAP/socrate) reviews in its pull request previews: a Vite plugin, the React review component, the CI commands, and the commands your coding agent uses to read and answer the feedback ([For coding agents](#for-coding-agents)). You write one `socrate.yml`, add the plugin, render the component behind a build-time flag, and add two CI steps. Production builds contain no Socrate code.
 
-Requirements: a Socrate service you host ([self-host guide](https://github.com/meyer0x/socrate/blob/main/docs/self-host-cloudflare.md)), Vite, React 19, GitHub Actions, Node 20 or later in CI.
+Requirements: a Socrate service you host ([self-host guide](https://github.com/AVEST-VAP/socrate/blob/main/docs/self-host-cloudflare.md)), Vite, React 19, GitHub Actions, Node 20 or later in CI.
 
 ```sh
 npm install @meyer0x/socrate
@@ -28,7 +28,7 @@ previews: https://*.my-app.pages.dev              # origins of your previews, as
 | `before` | `The app before pull request #{pr}.` | "Before" text of the generic manifest, shown to reviewers; `{pr}` and `{title}` (the pull request title) are replaced. At most 400 characters once rendered. |
 | `now` | `Pull request #{pr}: {title}` | "Now" text of the generic manifest, same placeholders. Write both in your reviewers' language. |
 | `csp` | none | Headers file of the build output to complete, e.g. `_headers` (relative to Vite's `build.outDir`). |
-| `zones` | one zone `/` | Zones of the generic manifest: a list of `{ id, title, route }` (all the zone fields of the [manifest](https://github.com/meyer0x/socrate/blob/main/docs/integrate.md#the-socrate-manifest) are accepted). |
+| `zones` | one zone `/` | Zones of the generic manifest: a list of `{ id, title, route }` (all the zone fields of the [manifest](https://github.com/AVEST-VAP/socrate/blob/main/docs/integrate.md#the-socrate-manifest) are accepted). |
 | `manifest` | none | `.socrate/` folder (relative to `socrate.yml`) assembled instead of the generic manifest when the pull request has one. |
 
 An invalid file stops the build or the command with one line per faulty key.
@@ -85,7 +85,7 @@ export function Review({ user, navigation }: { user: { id: string } | null; navi
 ```
 
 - `preview`: `import.meta.env.SOCRATE`. The component renders nothing inside an iframe, or when the page origin differs from `preview.origin`.
-- `getIdentityAssertion(signal)`: calls the identity bridge of your backend, which returns a 60-second ES256 assertion for the signed-in user. The contract is in [docs/integrate.md](https://github.com/meyer0x/socrate/blob/main/docs/integrate.md#1-identity-bridge). It may be written inline: the component always calls the latest function it received, and a new function does not restart the review client.
+- `getIdentityAssertion(signal)`: calls the identity bridge of your backend, which returns a 60-second ES256 assertion for the signed-in user. The contract is in [docs/integrate.md](https://github.com/AVEST-VAP/socrate/blob/main/docs/integrate.md#1-identity-bridge). It may be written inline: the component always calls the latest function it received, and a new function does not restart the review client.
 - `navigation`: `{ current(), go(route) }`, wired to your router.
 - `key`: remount the component when the signed-in user, or the account they impersonate, changes in the same tab.
 
@@ -198,7 +198,7 @@ npx @meyer0x/socrate resolve <id> --message "Shortened the reminder label."   # 
 - Each write is one request with an idempotency key, retried with the same key after a lost answer. If the outcome is still unknown after the retries (network, 5xx, lost answer), the command exits with `1` and prints the key: `The reply may have been recorded. Run the command again with --key <key> so as not to duplicate it.` With `--json`, standard output holds `{ "outcome": "uncertain", "idempotencyKey": "<key>", "message": "…" }`. Run the same command with `--key <key>`: the service returns the first result instead of writing twice. Without `--key`, each command is a new write, even with the same message.
 - A token the service refuses with `401` (revoked or expired) is removed from the credentials file; run `npx @meyer0x/socrate login` again.
 - Readable output replaces control characters coming from the service (bodies, names, target, HTML) with `�`; `--json` keeps them as sent.
-- `--json` prints stable JSON, made for agents: the service's thread, message and list objects ([agent API](https://github.com/meyer0x/socrate/blob/main/docs/agent-api.md)).
+- `--json` prints stable JSON, made for agents: the service's thread, message and list objects ([agent API](https://github.com/AVEST-VAP/socrate/blob/main/docs/agent-api.md)).
 
 ## Commands
 
@@ -222,7 +222,7 @@ Exit codes: `0` success, `1` refusal by the service (its status, code and messag
 
 ## Without Vite, React or GitHub Actions
 
-The service also serves a self-contained client module (`GET /v1/client`, then `mount(element, props)`) for apps without React or without npm, and the deployment import is a plain HTTP `PUT`. See [docs/integrate.md](https://github.com/meyer0x/socrate/blob/main/docs/integrate.md).
+The service also serves a self-contained client module (`GET /v1/client`, then `mount(element, props)`) for apps without React or without npm, and the deployment import is a plain HTTP `PUT`. See [docs/integrate.md](https://github.com/AVEST-VAP/socrate/blob/main/docs/integrate.md).
 
 ## License
 

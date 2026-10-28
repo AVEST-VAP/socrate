@@ -173,7 +173,7 @@ EOF
 
 ## Try Socrate against your own app locally
 
-Before deploying anything, you can run the service on your machine and point your app's dev server at it. From a clone of this repository (installed as in the README's "Try it locally"), with your app served on `http://127.0.0.1:5173` and its `.socrate/` folder at hand:
+Before deploying anything, you can run the service on your machine and point your app's dev server at it. From a clone of this repository (installed as in the README's [Quick start](../README.md#quick-start)), with your app served on `http://127.0.0.1:5173` and its `.socrate/` folder at hand:
 
 ```sh
 npm --prefix "$SOCRATE_DIR" run serve -- --origin http://127.0.0.1:5173 --manifest .socrate
