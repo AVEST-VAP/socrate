@@ -46,7 +46,7 @@ Details: [docs/how-it-works.md](docs/how-it-works.md).
 Requirements: Node 22.18 or later, which runs TypeScript files directly (CI uses 25.9), npm, macOS or Linux. Everything stays inside the clone: npm cache, test browsers, runtime data and temporary files live under `.local/` and `.tmp/`, both ignored by Git.
 
 ```sh
-git clone https://github.com/meyer0x/socrate.git && cd socrate
+git clone https://github.com/AVEST-VAP/socrate.git && cd socrate
 unset NODE_OPTIONS
 export TMPDIR=$PWD/.tmp/tmp TMP=$PWD/.tmp/tmp TEMP=$PWD/.tmp/tmp
 export npm_config_cache=$PWD/.local/npm-cache PLAYWRIGHT_BROWSERS_PATH=$PWD/.local/pw-browsers NODE_COMPILE_CACHE=$PWD/.local/node-compile-cache

@@ -6,10 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/meyer0x/socrate.git",
+    "url": "git+https://github.com/AVEST-VAP/socrate.git",
     "directory": "packages/socrate"
   },
-  "homepage": "https://github.com/meyer0x/socrate#readme",
+  "homepage": "https://github.com/AVEST-VAP/socrate#readme",
   "keywords": ["review", "preview", "feedback", "vite", "react", "agent"],
   "type": "module",
   "sideEffects": false,
