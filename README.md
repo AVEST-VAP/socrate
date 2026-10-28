@@ -1,25 +1,24 @@
+<h1 align="center">Socrate</h1>
+
+<p align="center">
+  <strong>Click any element of a pull request preview to comment.<br>Your coding agent reads the thread, fixes it and resolves it.</strong>
+</p>
+
 <p align="center">
   <sub>Built by</sub><br>
   <a href="https://www.avest.fr">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/avest-logo-dark.svg">
       <source media="(prefers-color-scheme: light)" srcset=".github/assets/avest-logo-light.svg">
-      <img alt="Avest" src=".github/assets/avest-logo-light.svg" width="88">
+      <img alt="Avest" src=".github/assets/avest-logo-light.svg" width="110">
     </picture>
   </a>
 </p>
 
-<h1 align="center">Socrate</h1>
-
 <p align="center">
-  <strong>Comments on the real preview of a pull request, read back and resolved by your coding agent.</strong>
-</p>
-
-<p align="center">
-  <a href="https://www.npmjs.com/package/@meyer0x/socrate"><img alt="npm version" src="https://img.shields.io/npm/v/@meyer0x/socrate?color=0A0A0A&label=npm"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0A0A0A"></a>
+  <a href="https://www.npmjs.com/package/@meyer0x/socrate"><img alt="npm version" src="https://img.shields.io/npm/v/@meyer0x/socrate?color=2563EB&label=npm"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2563EB"></a>
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-2E7D32"></a>
-  <a href="https://www.avest.fr"><img alt="Built by Avest" src="https://img.shields.io/badge/built%20by-Avest-0A0A0A"></a>
 </p>
 
 <p align="center">
@@ -37,9 +36,9 @@ Socrate lets product people leave contextual feedback directly inside the previe
 
 ## Why
 
-Socrate was built at [Avest](https://www.avest.fr), a French real-estate CRM, to review the pull request previews of its own product. It is open source so that any team can use it.
-
 A pull request preview is where product people actually see a change. Their feedback usually leaves that context: a screenshot in a chat, a vague ticket, a comment that no longer matches the build. The developer, or the coding agent doing the work, then has to guess which element, which screen and which version the remark was about.
+
+We built Socrate at [Avest](https://www.avest.fr), a French real-estate CRM, to review the pull request previews of our own product and hand that feedback straight to coding agents. We opened it so that any team shipping previews can do the same.
 
 Socrate keeps the feedback where it was given. Socrate never calls an AI model and never triggers anything on its own. Agents come and read when they decide to.
 
@@ -76,8 +75,8 @@ Details: [docs/how-it-works.md](docs/how-it-works.md).
 ## Features
 
 - **Comment in place.** A reviewer clicks an element in the preview and writes a comment. Socrate stores it with the target element, the route, a screenshot of the tab taken at that moment, and the exact deployment and revision. Images and videos can be attached.
-- **Threads that stay on the page.** Pins on elements and a list of conversations per screen. Threads survive redeployments of the preview; when the target moved, the thread shows where it was on its screenshot.
-- **Agents in the loop.** A coding agent lists open threads, reads replies and screenshots, and polls for changes incrementally with a read-only token. Connected by its developer, it also replies, resolves and reopens threads in their name, each resolution linked to a commit.
+- **Threads that stay on the page.** Pins on elements and a list of conversations per screen. Threads survive redeployments of the preview; when the target can no longer be found, the thread shows where it was on its screenshot.
+- **Agents in the loop.** A coding agent lists open threads, reads replies and screenshots, and polls for changes incrementally with a read-only token. Connected by its developer, it also replies, resolves and reopens threads in their name, each resolution can be linked to a commit.
 - **Nothing in production.** The client exists only in preview builds; `socrate check-absent` checks production builds.
 - **Self-hosted.** One Cloudflare Worker, one D1 database, one R2 bucket, under your account.
 
@@ -138,7 +137,7 @@ npx @meyer0x/socrate threads --json
 npx @meyer0x/socrate resolve <id> --message "Shortened the label."
 ```
 
-`thread <id> --captures .socrate` downloads the target and the screenshot of a thread, and `reply <id>` answers it. Messages show "Your Name · via Claude"; resolutions read « Corrigé par Claude » with the commit. Details: [For coding agents](packages/socrate/README.md#for-coding-agents).
+`thread <id> --captures .socrate` downloads the target and the screenshot of a thread, and `reply <id> "<message>"` answers it. Messages show "Your Name · via Claude"; resolutions read « Corrigé par Claude », with the commit on hover. Details: [For coding agents](packages/socrate/README.md#for-coding-agents).
 
 - Read feedback without a person, with a `review.read` token: [docs/agent-api.md](docs/agent-api.md). The examples in that file are executed verbatim by the test suite.
 - Prepare a review: the `.socrate/` manifest section of [docs/integrate.md](docs/integrate.md).
