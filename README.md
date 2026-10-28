@@ -30,7 +30,7 @@
 
 <p align="center">
   <img alt="On a pull request preview of the Avest CRM, a reviewer clicks a price, writes a comment and sends it; then the thread shows the fix by Claude, live on the preview" src=".github/assets/socrate-demo.gif" width="960">
-  <br><sub>Socrate on a pull request preview of the Avest CRM, with sample data.</sub>
+  <br><sub>Socrate on a pull request preview of the Avest CRM. Every name, address and amount on screen is fictional sample data.</sub>
 </p>
 
 Socrate lets product people leave contextual feedback directly inside the preview deployments of a web app, and lets coding agents read that feedback back, reply and resolve it.
