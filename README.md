@@ -29,7 +29,8 @@
 </p>
 
 <p align="center">
-  <img alt="A reviewer clicks a button in a preview, writes a comment, and the thread appears as a pin on the element and in the conversation list" src=".github/assets/socrate-demo.gif" width="960">
+  <img alt="On a pull request preview of the Avest CRM, a reviewer clicks a price, writes a comment and sends it; then the thread shows the fix by Claude, live on the preview" src=".github/assets/socrate-demo.gif" width="960">
+  <br><sub>Socrate on a pull request preview of the Avest CRM, with sample data.</sub>
 </p>
 
 Socrate lets product people leave contextual feedback directly inside the preview deployments of a web app, and lets coding agents read that feedback back, reply and resolve it.
@@ -123,7 +124,7 @@ Package reference: [packages/socrate/README.md](packages/socrate/README.md).
 ## For coding agents
 
 <p align="center">
-  <img alt="A resolved thread: the reviewer's comment, the developer's reply via Claude, and the resolution marked « Corrigé par Claude · en attente de la prochaine preview »" src=".github/assets/resolved-by-claude.png" width="720">
+  <img alt="A resolved thread: the reviewer's comment, the developer's reply via Claude, and the resolution marked « Corrigé par Claude · en ligne depuis 11 h 18 »" src=".github/assets/resolved-by-claude.png" width="720">
 </p>
 
 Connect your agent once per project and machine, then let it work through the feedback of your pull request:
