@@ -1,6 +1,7 @@
 /** Calculs purs de présentation : placement de la bulle, regroupement des pastilles, initiales, couleurs et dates. */
 
 export type Box = { x: number; y: number; width: number; height: number };
+type Point = { x: number; y: number };
 const GAP = 8;
 const EDGE = 8;
 /** Hauteur réservée à la toolbar en bas de fenêtre. */
@@ -9,10 +10,11 @@ const POINT_GAP = 12;
 
 /**
  * Ancre ponctuelle (largeur et hauteur nulles, point du clic) : sous le point puis au-dessus, décalée de 20 px vers la gauche.
- * Ancre rectangulaire : à droite, puis à gauche, dessous, dessus. Toujours à 8 px des bords, jamais dans la bande de la toolbar.
- * Sous 520 px de large, feuille en bas d'écran.
+ * Ancre rectangulaire : la cible reste visible. À droite, puis à gauche, dessous, dessus ; avec `near`, le côté libre le plus proche de ce point, le long duquel la bulle s'aligne.
+ * Sans côté libre, le placement qui recouvre le moins la partie affichée de la cible ; à égalité, le plus proche de `near`, à défaut sous ce point comme pour une ancre ponctuelle.
+ * Toujours à 8 px des bords, jamais dans la bande de la toolbar. Sous 520 px de large, feuille en bas d'écran.
  */
-export function place(a: Box, size: { width: number; height: number }, view: { width: number; height: number }): { x: number; y: number; sheet: boolean } {
+export function place(a: Box, size: { width: number; height: number }, view: { width: number; height: number }, near?: Point): { x: number; y: number; sheet: boolean } {
   if (view.width < 520) return { x: EDGE, y: Math.max(EDGE, view.height - size.height - TOOLBAR), sheet: true };
   const bottom = view.height - TOOLBAR;
   const clampX = (x: number) => Math.max(EDGE, Math.min(x, view.width - size.width - EDGE));
@@ -24,15 +26,36 @@ export function place(a: Box, size: { width: number; height: number }, view: { w
     const over = a.y - POINT_GAP - size.height;
     return { x: clampX(a.x - 20), y: fitsY(under) ? under : fitsY(over) ? over : clampY(under), sheet: false };
   }
-  const right = a.x + a.width + GAP;
-  const left = a.x - GAP - size.width;
-  const below = a.y + a.height + GAP;
-  const above = a.y - GAP - size.height;
-  if (fitsX(right)) return { x: right, y: clampY(a.y), sheet: false };
-  if (fitsX(left)) return { x: left, y: clampY(a.y), sheet: false };
-  if (fitsY(below)) return { x: clampX(a.x), y: below, sheet: false };
-  if (fitsY(above)) return { x: clampX(a.x), y: above, sheet: false };
-  return { x: clampX(a.x + a.width - size.width), y: clampY(a.y + a.height - size.height), sheet: false };
+  // Seule la partie affichée compte : un élément plus grand que la fenêtre ne repousse pas la bulle hors de l'écran.
+  const x1 = Math.max(0, Math.min(a.x, view.width));
+  const x2 = Math.max(0, Math.min(a.x + a.width, view.width));
+  const y1 = Math.max(0, Math.min(a.y, view.height));
+  const y2 = Math.max(0, Math.min(a.y + a.height, view.height));
+  const right = x2 + GAP;
+  const left = x1 - GAP - size.width;
+  const below = y2 + GAP;
+  const above = y1 - GAP - size.height;
+  const alongX = clampX(near ? near.x - 20 : x1);
+  const alongY = clampY(near ? near.y - 20 : y1);
+  const covered = (p: Point) => Math.max(0, Math.min(p.x + size.width, x2) - Math.max(p.x, x1)) * Math.max(0, Math.min(p.y + size.height, y2) - Math.max(p.y, y1));
+  const away = (p: Point) => (near ? Math.hypot(Math.max(0, p.x - near.x, near.x - p.x - size.width), Math.max(0, p.y - near.y, near.y - p.y - size.height)) : 0);
+  const sides = [{ x: right, y: alongY }, { x: left, y: alongY }, { x: alongX, y: below }, { x: alongX, y: above }];
+  const free = sides.filter((p) => fitsX(p.x) && fitsY(p.y));
+  const crowded = [
+    ...sides,
+    { x: right, y: below }, { x: left, y: below }, { x: right, y: above }, { x: left, y: above },
+    ...(near ? [{ x: alongX, y: near.y + POINT_GAP }, { x: alongX, y: near.y - POINT_GAP - size.height }] : []),
+  ].map((p) => ({ x: clampX(p.x), y: clampY(p.y) }));
+  // Tri stable : à égalité, l'ordre des côtés décide.
+  const [best] = (free.length ? free : crowded).sort((p, q) => covered(p) - covered(q) || away(p) - away(q));
+  return { ...best!, sheet: false };
+}
+
+/** Plus petit rectangle qui contient les deux autres : la cible d'un fil et sa pastille, à ne pas recouvrir ensemble. */
+export function hull(a: Box, b: Box): Box {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
 }
 
 /** Regroupe les points à moins de `radius` px du premier point de chaque groupe, dans l'ordre reçu. */
