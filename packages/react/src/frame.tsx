@@ -967,7 +967,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
         <Boundary>
           {!editorial && <Tip doc={listDoc.ownerDocument} />}
           {aside === 'agents'
-            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><AgentsView client={client} onBack={() => setAside(null)} onClose={closeList} headingRef={headingRef} /></Suspense>
+            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><AgentsView client={client} canModerate={canModerate} onBack={() => setAside(null)} onClose={closeList} headingRef={headingRef} /></Suspense>
             : editorial
             ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><Panel client={client} capture={capture} navigation={navigation} visible={listOpen} onClose={closeList} revision={revision} threads={threads} status={status} refresh={refresh} /></Suspense>
             : <>

@@ -37,3 +37,10 @@ The developer runs `npx @meyer0x/socrate login`; the service starts a device aut
 - One more credential kind in `authenticate`, after sessions and technical tokens. The lookup costs one indexed read; `lastUsedAt` is written at most once a minute per token.
 - The `slow_down` interval is stored per code. The cleanup of expired codes and old failures runs at each start.
 - Deployment order: the Worker is updated before clients. As for every migration, the Worker refuses a database whose schema it does not know: apply `0008_agent_tokens.sql` and deploy the Worker together.
+
+## Amendment: images and rights update
+
+A real review showed two limits of this decision: the agent could not show its result, and a token approved before a person gained `thread.moderate` could not resolve other people's threads.
+
+- **Images on replies.** A delegated token reserves and uploads images for a reply: no video, no thread, 12 reservations pending per person on a review. There is no new capability: the right follows `thread.participate`, so **tokens already issued gain it when the service is deployed**, and the consent text now names it. No delete exists: an image published by mistake stays until the review is purged.
+- **Rights update.** Capabilities stay frozen at approval and never follow a session on their own. **Mettre à jour** copies them from the current session after an explicit click, with the refusals of approval. A script injected in a preview could send that request, which is the residual risk already accepted for approval.

@@ -264,7 +264,10 @@ export const describeThread = (t: ThreadWithMessages) => [`Conversation de ${t.a
 /** Consigne de la personne connectée dans ce fil, lue dans ses messages : `@agent` ne déclenche rien. */
 export const handoffIn = ({ session }: Review, t: ThreadWithMessages) => (session ? handoffOf(t.messages, session.actor.key) : null);
 const HANDOFF_NAMES = { pending: 'Pour mon agent', answered: 'Réponse de l’agent', superseded: 'Consigne annulée' };
+/** L'agent a écrit en dernier sur un fil ouvert : une personne juge le résultat, sur la preview, avant de le résoudre. Aucune permission : tout relecteur le voit. */
+export const toVerify = (t: ThreadWithMessages) => t.state === 'open' && !!t.messages.at(-1)?.via;
 export function HandoffTag({ review, thread }: { review: Review; thread: ThreadWithMessages }) {
+  if (toVerify(thread)) return <span className="socrate-tag" data-testid="socrate-to-verify">À vérifier</span>;
   const h = handoffIn(review, thread);
   // Résoudre depuis le navigateur n'écrit aucun message : une consigne en attente n'a plus d'objet sur un fil résolu.
   if (h?.state === 'pending' && thread.state === 'resolved') return null;

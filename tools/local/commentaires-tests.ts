@@ -3398,6 +3398,16 @@ test('résolution par un agent avec commit : en attente sans déploiement posté
     await list(page).getByRole('button', { name: 'Autoriser' }).click();
     await list(page).getByTestId('socrate-agent-done').waitFor();
     const grant = await (await fetch(`${stack.view.serviceUrl}/v1/auth/device/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceCode: started.deviceCode }) })).json() as { accessToken: string };
+    const answered = await fetch(`${API()}/threads/${id}/messages`, {
+      method: 'POST', headers: { Authorization: `Bearer ${grant.accessToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomBytes(16).toString('hex') },
+      body: JSON.stringify({ body: 'Titre agrandi, à vérifier sur la preview.' }),
+    });
+    assert.equal(answered.status, 201);
+    await page.reload();
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    await row(page, id).getByTestId('socrate-to-verify').waitFor();
+    await control(page, 'launcher').click();
     const commit = '0a1b2c3d4e5f6a7b';
     const resolved = await fetch(`${API()}/threads/${id}/resolve`, {
       method: 'POST', headers: { Authorization: `Bearer ${grant.accessToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomBytes(16).toString('hex') },

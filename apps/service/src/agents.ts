@@ -185,6 +185,22 @@ export async function listAgents(env: Env, principal: Principal, projectId: stri
   return rows.map((r) => ({ tokenId: r.token_id, agent: r.agent, machine: r.machine, capabilities: JSON.parse(r.capabilities), createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: isoOf(r.expires_at) }));
 }
 
+/**
+ * Mise à jour explicite dans le panneau : le jeton de l'acteur reçoit les capacités de sa session actuelle, gain ou perte, jamais en silence ni au gré d'une session.
+ * Mêmes refus que l'approbation : un agent agit au nom de la personne réelle, avec ce qu'elle peut faire.
+ */
+export async function refreshAgent(env: Env, principal: Principal, projectId: string, tokenId: string): Promise<{ tokenId: string; capabilities: Capability[] }> {
+  const p = reviewer(principal, projectId);
+  if (p.exploring) throw new HttpError(403, 'forbidden', 'mise à jour impossible en explorant un compte : un agent agit au nom de la personne réelle');
+  if (!p.capabilities.includes('thread.participate')) throw new HttpError(403, 'forbidden', 'capacité thread.participate absente : rien à déléguer');
+  const wanted: Capability[] = ['review.read', 'thread.participate', ...(p.capabilities.includes('thread.moderate') ? ['thread.moderate' as const] : [])];
+  const capabilities = delegatedCapabilities(readConfig(env), projectId, wanted);
+  const r = await env.DB.prepare('UPDATE agent_tokens SET capabilities = ? WHERE token_id = ? AND project_id = ? AND actor_key = ? AND revoked_at IS NULL AND expires_at >= ?')
+    .bind(JSON.stringify(capabilities), tokenId, projectId, p.actor.key, nowSec()).run();
+  if ((r.meta.changes ?? 0) === 0) throw new HttpError(404, 'not_found', 'agent inconnu');
+  return { tokenId, capabilities };
+}
+
 /** Révocation par l'acteur dans le panneau : seulement ses propres jetons ; une seconde révocation rend le même résultat. */
 export async function revokeAgent(env: Env, principal: Principal, projectId: string, tokenId: string): Promise<{ tokenId: string; revoked: true }> {
   const p = reviewer(principal, projectId);

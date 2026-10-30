@@ -3,7 +3,7 @@ import type { Env } from './env.ts';
 import { isConstraintViolation, uncertain } from './d1.ts';
 import { HttpError, PRIVATE_HEADERS, nowIso } from './http.ts';
 import { RESERVATION_TTL_SECONDS } from './captures.ts';
-import { ACTIVE_REVIEW, requireActive, type Guard, type ParticipantScope, type WriterScope } from './threads.ts';
+import { ACTIVE_REVIEW, requireActive, type Guard, type WriterScope } from './threads.ts';
 
 export const ATTACHMENT_PREFIX = 'attachments/';
 export const attachmentPrefixOf = (projectId: string, reviewKey: string) => `${ATTACHMENT_PREFIX}${projectId}/${reviewKey}/`;
@@ -20,6 +20,18 @@ const sameMeta = (a: AttachmentMeta, b: AttachmentMeta) => a.name === b.name && 
 const OWNED = 'project_id = ? AND review_key = ? AND actor_key = ? AND operation = ? AND idempotency_key = ?';
 const ownedBinds = (p: WriterScope, operation: AttachmentOperation, key: string) => [p.projectId, p.reviewKey, p.actor.key, operation, key];
 
+/** Pièces réservées et non rattachées qu'un agent garde à la fois : aucune tâche ne nettoie avant expiration, un jeton volé ne remplit pas le stockage. */
+const AGENT_PENDING = 12;
+
+/** Un agent joint des images à une réponse, jamais une vidéo ni une pièce d'un fil qu'il ne peut pas créer. */
+export async function checkAgentAttachments(env: Env, scope: WriterScope, operation: AttachmentOperation, attachments: AttachmentMeta[]): Promise<void> {
+  if (operation !== 'message.create') throw new HttpError(403, 'forbidden', 'un agent délégué joint une pièce à une réponse seulement');
+  if (attachments.some((a) => !a.contentType.startsWith('image/'))) throw new HttpError(403, 'forbidden', 'un agent délégué joint des images seulement');
+  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM attachments WHERE project_id = ? AND review_key = ? AND actor_key = ? AND state = 'reserved' AND expires_at > ?")
+    .bind(scope.projectId, scope.reviewKey, scope.actor.key, nowSec()).first<{ n: number }>();
+  if ((pending?.n ?? 0) + attachments.length > AGENT_PENDING) throw new HttpError(429, 'rate_limited', 'trop de pièces en attente : publier ou attendre leur expiration', true);
+}
+
 /** Empreinte de la liste ordonnée des pièces : une même clé ne réserve jamais deux listes différentes. */
 const listDigest = (list: AttachmentMeta[]) => digestOf(list as unknown as Json);
 
@@ -27,7 +39,7 @@ const listDigest = (list: AttachmentMeta[]) => digestOf(list as unknown as Json)
  * Réserve les pièces d'une opération sous sa clé, avant tout octet. Un nouvel appel avec la même clé et la même liste rend les mêmes
  * identifiants et prolonge les réservations non rattachées ; une autre liste sous cette clé est un conflit. Aucune pièce d'une revue inactive.
  */
-export async function reserveAttachments(env: Env, input: { scope: ParticipantScope; key: string; operation: AttachmentOperation; attachments: AttachmentMeta[] }): Promise<AttachmentReservation> {
+export async function reserveAttachments(env: Env, input: { scope: WriterScope; key: string; operation: AttachmentOperation; attachments: AttachmentMeta[] }): Promise<AttachmentReservation> {
   const p = input.scope;
   const digest = await listDigest(input.attachments);
   const owned = ownedBinds(p, input.operation, input.key);
@@ -70,7 +82,7 @@ const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16)
  * lecture, signature des premiers octets cohérente avec le type réservé, SHA-256 calculé au passage et revérifié par R2. L'objet propre
  * à la pièce n'est écrit que s'il est absent ; un objet existant identique rend l'appel idempotent.
  */
-export async function uploadAttachment(env: Env, input: { scope: ParticipantScope; attachmentId: string; contentType: string; declaredLength: number | null; body: ReadableStream<Uint8Array> | null }): Promise<void> {
+export async function uploadAttachment(env: Env, input: { scope: WriterScope; attachmentId: string; contentType: string; declaredLength: number | null; body: ReadableStream<Uint8Array> | null }): Promise<void> {
   const p = input.scope;
   const row = await env.DB.prepare('SELECT * FROM attachments WHERE project_id = ? AND review_key = ? AND attachment_id = ? AND actor_key = ?')
     .bind(p.projectId, p.reviewKey, input.attachmentId, p.actor.key).first<Row>();

@@ -26,6 +26,7 @@ npx @meyer0x/socrate threads                                   # open threads of
 npx @meyer0x/socrate threads --for-agent                       # only what the signed-in person handed to their agent
 npx @meyer0x/socrate thread <id> --captures .socrate-shots     # messages, target, screenshot and attachments
 npx @meyer0x/socrate reply <id> "Fixed in the next commit."
+npx @meyer0x/socrate reply <id> "Here is the result." --attach after.png   # up to 4 PNG, JPEG or WebP images
 npx @meyer0x/socrate resolve <id> --message "Shortened the label."   # commit defaults to HEAD
 npx @meyer0x/socrate reopen <id> --message "Regression seen on the preview."
 npx @meyer0x/socrate logout
@@ -72,12 +73,13 @@ The CLI follows this protocol; any tool can.
 
 ### The delegated token
 
-- **Scope**: the whole project, every review. It gives every read of this guide, like `review.read`, and the writes below. Nothing else: no thread creation, no wording proposal, no attachment, no archive, no purge, no import (`403 forbidden` with the reason).
+- **Scope**: the whole project, every review. It gives every read of this guide, like `review.read`, and the writes below. Nothing else: no thread creation, no wording proposal, no video, no archive, no purge, no import (`403 forbidden` with the reason).
 - **Tools only**: a request carrying a delegated token **and** an `Origin` header is refused with `403`. The start and the exchange refuse `Origin` too. The token is never meant for a page.
 - **Policy at each use**: capabilities are intersected again with the project's `attestableCapabilities` at every request. If `thread.moderate` is removed, the agent can no longer resolve other people's threads; if `thread.participate` is removed, the token gives nothing, reads included.
 - **Revocation** takes effect at the next request (`401 unauthenticated`):
   - in the panel, **Connecter un agent → Mes agents** lists the agents of the signed-in person on the project (`GET /v1/projects/{project}/agents`: `{ items: [{ tokenId, agent, machine, capabilities, createdAt, lastUsedAt, expiresAt }] }`) and revokes one (`POST /v1/projects/{project}/agents/{tokenId}/revoke`);
   - the tool revokes its own token with `POST /v1/auth/agent/revoke` (`npx @meyer0x/socrate logout`).
+- **Updating rights**: capabilities are frozen at approval, so a person who gains `thread.moderate` later keeps an agent that cannot resolve other people's threads. **Mes agents** then shows **Mettre à jour**, which calls `POST /v1/projects/{project}/agents/{tokenId}/refresh` with the session: the token takes the capabilities of that session, intersected with the project's policy. It never happens on its own, and a delegated token cannot call it. The CLI points there on a `403` from `resolve` or `reopen`.
 - **Backup and restore**: delegated tokens, like sessions and read tokens, are not exported; after a restore, every agent runs `npx @meyer0x/socrate login` again.
 
 ## Writes with a delegated token
@@ -89,10 +91,14 @@ Every write carries an `Idempotency-Key` header (8 to 128 characters `A-Za-z0-9_
 | Reply to a thread | `POST …/reviews/{review}/threads/{threadId}/messages` | `{ body }` | the message, `201` |
 | Resolve | `POST …/reviews/{review}/threads/{threadId}/resolve` | `{ message, commit? }` | the message, `201` |
 | Reopen | `POST …/reviews/{review}/threads/{threadId}/reopen` | `{ message }` | the message, `201` |
+| Reserve images for a reply | `POST …/reviews/{review}/attachments` | `{ operation: "message.create", attachments }` | ids, `201` |
+| Upload one image | `PUT …/reviews/{review}/attachments/{attachmentId}` | the bytes | `{ uploaded: true }` |
 
 - `message` is required: the state change and its message are written in one batch, with one change-log entry. `commit` is hexadecimal, 7 to 40 characters.
 - The existing rule applies: the author resolves and reopens their own threads; `thread.moderate` allows it on any thread (`403 forbidden` otherwise). A thread already in the requested state gives `409 state_conflict`; a concurrent change, `412 state_conflict`.
 - `PUT …/threads/{threadId}/state` (the browser's state change, without message) is refused to a delegated token.
+- **Images.** Reserve, upload, then reply with the same `attachments` list under the same `Idempotency-Key`. PNG, JPEG or WebP only, on a reply only, 4 per message, 10 MiB each, and 12 reservations pending per person on a review (`429 rate_limited`). The CLI recognises an image by its bytes, so an instruction read in a thread cannot make it send another file. `resolve` takes no image: reply first.
+- **"À vérifier".** An open thread whose last message comes from an agent shows this tag and a filter in the triage view. Prefer `reply` over `resolve` when a person should judge the result: the panel then keeps the thread in front of them. Nothing certifies that a person checked it.
 
 Each message has `via`, the name of the agent that wrote it in the person's name (`null` from the browser), and `transition`, `null` for a plain message. A resolution or reopening message carries `transition: { state, commit, deploymentId, liveSince, liveState }`: `commit` as sent; for a resolution `deploymentId`, the latest non-revoked deployment of the review at the time of the write, which is almost always a build without the fix (kept for compatibility, not shown). `liveSince` and `liveState` are computed at each read for a resolution with a commit, `null` otherwise: `liveSince` is the `createdAt` of the first non-revoked deployment of the review whose commit matches `commit` (prefix in either direction, since lengths differ); `liveState` is `live` when that deployment exists, `pending` while no non-revoked deployment was created after the resolution, and `unknown` once one was, under another commit. The service knows no Git ancestry: a later build may contain the fix without carrying that exact commit, so nothing is asserted then. These fields appear in every thread read, list and change-log read; both are absent from services older than 0.3.0. The panel shows "Claude via Karim Benali", with the logo the host passes in `agentLogos` or a neutral monogram (the agent name is declared at login, so a logo proves nothing), then "Corrigé par Claude · en ligne depuis 11 h 24" (`live`), "Corrigé par Claude · en attente de la prochaine preview" (`pending`) or "Corrigé par Claude" (`unknown` or older service), with the short commit on hover; without commit, or written by a person, "Résolu par …". `socrate thread` prints "fixed in abc1234 · live since 2026-10-27 11:24 UTC", "· waiting for the next preview" or nothing more, and every time in UTC.
 
