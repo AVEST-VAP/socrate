@@ -12,8 +12,9 @@ export type CaptureStatus =
  * `shared` : le partage qui a produit l'image n'a pas été révoqué depuis ; fermer Socrate arrête le flux sans révoquer. `current` : ce brouillon est encore celui du panneau.
  * `element` et `frame` : l'élément vivant désigné, qui ancre la bulle puis la pastille tant que ce document vit.
  * `point` : point du geste (clic, coin de la zone, fin de la sélection) relatif au coin de l'élément ; ancre la bulle, n'entre pas dans la cible publiée.
+ * `zone` : zone tirée ou sélection de texte, relative au coin de l'élément, que la bulle ne recouvre pas ; `null` : l'élément entier.
  */
-export type TargetedDraft = Readonly<{ target: Target; image: Readonly<{ blob: Blob; url: string; meta: ImageMeta }>; restoreFocus: HTMLElement | null; element: Element; frame: HTMLIFrameElement | null; point: Readonly<Point>; shared: () => boolean; current: () => boolean }>;
+export type TargetedDraft = Readonly<{ target: Target; image: Readonly<{ blob: Blob; url: string; meta: ImageMeta }>; restoreFocus: HTMLElement | null; element: Element; frame: HTMLIFrameElement | null; point: Readonly<Point>; zone: Readonly<Point & { width: number; height: number }> | null; shared: () => boolean; current: () => boolean }>;
 type Point = { x: number; y: number };
 
 type CaptureHandleTrack = MediaStreamTrack & { getCaptureHandle?: () => { handle: string; origin: string } | null };
@@ -375,6 +376,7 @@ export class TabCapture {
       const draft: TargetedDraft = Object.freeze({
         target, image: Object.freeze({ blob, url: URL.createObjectURL(blob), meta }), restoreFocus, element: el, frame,
         point: Object.freeze({ x: point.x - elRect.x, y: point.y - elRect.y }),
+        zone: area && Object.freeze({ x: area.x - elRect.x, y: area.y - elRect.y, width: area.width, height: area.height }),
         // Sans flux, seule une fermeture de Socrate a pu l'arrêter : toute révocation incrémente `consent`.
         shared: () => consent === this.consent && (this.stream === null || this.rightTab()),
         current: () => this.draftValue === draft,
