@@ -926,7 +926,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
         <span role="status" aria-live="polite" style={HIDDEN}>{announce}</span>
       </div>
       {shownNote && (
-        <p data-socrate="note" role="status" data-testid="socrate-note" style={{ left: center }}>
+        <p data-socrate="note" role="status" data-testid="socrate-note" style={{ left: center, maxWidth: Math.min(380, room - 16) }}>
           <span>{shownNote}</span>
           {(captureNote || capture?.invalidatedNotice) && !note && <button type="button" data-socrate-action="target">Réessayer</button>}
           {status?.kind === 'error' && status.retry && shownNote === status.text && <button type="button" data-socrate-action="reload">Réessayer</button>}

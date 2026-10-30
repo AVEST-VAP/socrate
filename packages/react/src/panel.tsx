@@ -259,8 +259,8 @@ function ThreadView({ epoch, thread, client, navigation, revisionId, session, se
       {thread.messages.map((m: Message) => (
         <div className="socrate-message" key={m.messageId}>
           <div className="socrate-meta">
-            <strong>{m.author.displayName}</strong>
-            {m.via ? ` · ${m.via} via ${m.author.displayName}` : ''}
+            <strong>{m.via ?? m.author.displayName}</strong>
+            {m.via ? ` via ${m.author.displayName}` : ''}
             {m.exploring ? ` (compte exploré : ${m.exploring.account})` : ''} · {formatDate(m.createdAt)}
             {m.transition && <> · <Transition m={m} /></>}
           </div>
