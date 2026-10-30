@@ -361,8 +361,27 @@ test('pièce d’agent : image sur une réponse ; ni vidéo, ni fil, ni au-delà
   const m = await call(agent, 'POST', `${threadsPath}/${id}/messages`, { body: 'Voici le rendu.', attachments: [pngMeta()] }, { 'Idempotency-Key': k });
   assert.equal(m.status, 201, JSON.stringify(m.json));
   assert.deepEqual([m.json.via, m.json.attachments.length], ['Claude', 1]);
-  for (let i = 0; i < 3; i++) assert.equal((await reserve('message.create', [pngMeta('a.png'), pngMeta('b.png'), pngMeta('c.png'), pngMeta('d.png')])).status, 201);
+  const four = [pngMeta('a.png'), pngMeta('b.png'), pngMeta('c.png'), pngMeta('d.png')];
+  const last = key();
+  await reserve('message.create', four);
+  await reserve('message.create', four);
+  const again = () => call(agent, 'POST', attachments, { operation: 'message.create', attachments: four }, { 'Idempotency-Key': last });
+  assert.equal((await again()).status, 201);
   assert.equal((await reserve('message.create', [pngMeta('e.png')])).status, 429, 'réservations en attente plafonnées');
+  assert.equal((await again()).status, 201, 'une reprise de la même liste ne compte pas');
+  const racing = await Promise.all([1, 2, 3, 4].map(() => reserve('message.create', four)));
+  assert.ok(racing.every((r) => r.status === 429), 'plafond atomique, même à plusieurs');
+
+  // Une vidéo réservée par la session du même acteur ne passe pas par son agent.
+  const video = await sessionClient(bench, { deploymentId: 'local-1', sub: 'vidz', name: 'Vidz', capabilities: ['thread.participate'] });
+  const own = await login(video);
+  const vid = { name: 'v.mp4', contentType: 'video/mp4', size: 40, sha256: '0'.repeat(64) };
+  const k2 = key();
+  const held = await call(video, 'POST', attachments, { operation: 'message.create', attachments: [vid] }, { 'Idempotency-Key': k2 });
+  assert.equal(held.status, 201);
+  const upload = await fetch(`${bench.service.url}${attachments}/${held.json.items[0].attachmentId}`, { method: 'PUT', headers: { Authorization: `Bearer ${own.token}`, 'Content-Type': 'video/mp4' }, body: new Uint8Array(40) });
+  assert.equal(upload.status, 403, 'téléversement refusé à l’agent');
+  assert.equal((await call(agentClient(own.token), 'POST', `${threadsPath}/${id}/messages`, { body: 'x', attachments: [vid] }, { 'Idempotency-Key': k2 })).status, 403, 'publication refusée à l’agent');
 });
 
 test('mise à jour des droits : explicite, depuis une session de l’acteur, jamais pour un autre', async () => {

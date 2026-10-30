@@ -240,7 +240,7 @@ async function route(env: Env, request: Request): Promise<Response> {
       const scope = writer(principal, reviewKey);
       const key = idempotencyKey(request);
       const body = await parsed(attachmentReservationSchema, request, 'pièces jointes invalides');
-      if (scope.via !== null) await checkAgentAttachments(env, scope, body.operation, body.attachments);
+      if (scope.via !== null) checkAgentAttachments(body.operation, body.attachments.map((a) => a.contentType));
       return json(await reserveAttachments(env, { scope, key, operation: body.operation, attachments: body.attachments }), 201);
     }
     if (seg[5] === 'attachments' && seg[6] && seg.length === 7) {
@@ -297,6 +297,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         const scope = writer(principal, reviewKey);
         const key = idempotencyKey(request);
         const body = await parsed(newMessageSchema, request, 'réponse invalide');
+        if (scope.via !== null && body.attachments) checkAgentAttachments('message.create', body.attachments.map((a) => a.contentType));
         const r = await reply(env, { scope, key, threadId, body: body.body, attachments: body.attachments });
         return json(r.message, r.created ? 201 : 200);
       }
