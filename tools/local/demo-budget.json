@@ -3,8 +3,8 @@
   "limites": {
     "entreeDeltaGzip": 1024,
     "bootstrapGzip": 2048,
-    "panneauGzip": 32768,
-    "arriveeOuvertureOctets": 131584,
+    "panneauGzip": 33536,
+    "arriveeOuvertureOctets": 134400,
     "ouvertureOctetsServis": 8192,
     "guideGzip": 3072,
     "captureGzip": 5632,

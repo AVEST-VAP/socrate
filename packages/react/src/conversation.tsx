@@ -1,9 +1,14 @@
-import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { handoffOf, type Actor, type Message, type Revision, type Session, type ThreadWithMessages } from '@socrate/contract';
+import { Suspense, createContext, lazy, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { handoffOf, waitsFor, type Actor, type Message, type Revision, type Session, type ThreadWithMessages } from '@socrate/contract';
 import type { CaptureStatus } from './capture.ts';
 import { describeOwner, isStaleTargeted, describePayload, slotId, type DraftAttachment, type Labels, type Owner, type ReviewClient, type Slot, type Submission, type SubmissionView } from './client.ts';
 import { colorOf, initialsOf, relativeDate } from './layout.ts';
 import { screenOf } from './locate.ts';
+import { insertMention, mentionAt } from './mention.ts';
+
+/** Client des suggestions de mention, partagé par tous les champs de la racine et de ses iframes. */
+export const MentionClient = createContext<ReviewClient | null>(null);
+const MentionMenu = lazy(() => import('./mentions.tsx').then((m) => ({ default: m.MentionMenu })));
 
 const AttachmentTray = lazy(() => import('./media.tsx').then((m) => ({ default: m.AttachmentTray })));
 export const MessageMedia = lazy(() => import('./media.tsx').then((m) => ({ default: m.MessageMedia })));
@@ -145,6 +150,25 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
 }) {
   const id = useId();
   const fileRef = useRef<HTMLInputElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const field = inputRef ?? ownRef;
+  const mentionClient = useContext(MentionClient);
+  // Fragment `@…` en cours ; Échap le referme jusqu'au prochain caractère.
+  const [mention, setMention] = useState<{ start: number; query: string; caret: number } | null>(null);
+  const [names, setNames] = useState<string[]>([]);
+  const [active, setActive] = useState(0);
+  const readMention = (el: HTMLTextAreaElement) => {
+    const m = onSend && mentionClient && el.selectionStart === el.selectionEnd ? mentionAt(el.value, el.selectionStart) : null;
+    setMention(m && { ...m, caret: el.selectionStart });
+    setActive(0);
+  };
+  const pickMention = (name: string) => {
+    if (!mention) return;
+    const next = insertMention(value, mention.start, mention.caret, name);
+    onChange(next.text);
+    setMention(null);
+    requestAnimationFrame(() => { field.current?.focus(); field.current?.setSelectionRange(next.caret, next.caret); });
+  };
   const [dropping, setDropping] = useState(false);
   const preparing = media?.submission.view.preparing ?? false;
   // Pendant la préparation, le champ et le retrait des pièces prêtes restent libres ; seuls l'envoi et les nouveaux ajouts attendent.
@@ -154,6 +178,12 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
   // Safari distribue `compositionend` avant le keydown d'Entrée qui valide la composition : ce keydown n'envoie pas.
   const composed = useRef(false);
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention && names.length) {
+      const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? names.length - 1 : 0;
+      if (step) { e.preventDefault(); setActive((a) => (a + step) % names.length); return; }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); pickMention(names[active] ?? names[0]!); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMention(null); return; }
+    }
     if (!onSend || e.key !== 'Enter' || e.shiftKey || e.altKey) return;
     if (e.nativeEvent.isComposing || e.keyCode === 229 || composed.current) return;
     e.preventDefault();
@@ -185,9 +215,12 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
       {me && <Avatar actor={me} />}
       <div className="socrate-field">
         <label htmlFor={id} className="socrate-visually-hidden">{label}</label>
-        <textarea ref={inputRef} id={id} rows={1} value={value} placeholder={placeholder} readOnly={busy} disabled={disabled}
+        <textarea ref={field} id={id} rows={1} value={value} placeholder={placeholder} readOnly={busy} disabled={disabled}
           aria-keyshortcuts={onSend ? 'Enter Meta+Enter Control+Enter' : undefined}
-          onChange={(e) => onChange(e.target.value)}
+          aria-activedescendant={mention && names.length ? `socrate-mention-${active}` : undefined}
+          onChange={(e) => { onChange(e.target.value); readMention(e.target); }}
+          onSelect={(e) => { if (mention) readMention(e.currentTarget); }}
+          onBlur={() => setMention(null)}
           onPaste={(e) => {
             const files = [...e.clipboardData.files];
             if (!media || !files.length) return;
@@ -198,6 +231,7 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
           }}
           onCompositionEnd={() => { composed.current = true; setTimeout(() => { composed.current = false; }, 0); }}
           onKeyDown={onKeyDown} />
+        {mention && mentionClient && <Suspense fallback={null}><MentionMenu client={mentionClient} me={me?.key ?? null} query={mention.query} active={active} onItems={setNames} onPick={pickMention} /></Suspense>}
         {media && (media.items.length > 0 || media.submission.view.converting) && <Suspense fallback={<p className="socrate-meta" role="status">Chargement des aperçus…</p>}><AttachmentTray items={media.items} converting={media.submission.view.converting} disabled={!canRemove}
           onRemove={(id) => media.submission.editAttachments(media.items.filter((a) => a.id !== id))} /></Suspense>}
         {(media || send) && (
@@ -263,10 +297,12 @@ export const describeThread = (t: ThreadWithMessages) => [`Conversation de ${t.a
 
 /** Consigne de la personne connectée dans ce fil, lue dans ses messages : `@agent` ne déclenche rien. */
 export const handoffIn = ({ session }: Review, t: ThreadWithMessages) => (session ? handoffOf(t.messages, session.actor.key) : null);
+export const forMe = ({ session }: Review, t: ThreadWithMessages) => !!session && t.state === 'open' && waitsFor(t.messages, session.actor);
 const HANDOFF_NAMES = { pending: 'Pour mon agent', answered: 'Réponse de l’agent', superseded: 'Consigne annulée' };
 /** L'agent a écrit en dernier sur un fil ouvert : une personne juge le résultat, sur la preview, avant de le résoudre. Aucune permission : tout relecteur le voit. */
 export const toVerify = (t: ThreadWithMessages) => t.state === 'open' && !!t.messages.at(-1)?.via;
 export function HandoffTag({ review, thread }: { review: Review; thread: ThreadWithMessages }) {
+  if (forMe(review, thread)) return <span className="socrate-tag" data-testid="socrate-for-me">Pour moi</span>;
   if (toVerify(thread)) return <span className="socrate-tag" data-testid="socrate-to-verify">À vérifier</span>;
   const h = handoffIn(review, thread);
   // Résoudre depuis le navigateur n'écrit aucun message : une consigne en attente n'a plus d'objet sur un fil résolu.

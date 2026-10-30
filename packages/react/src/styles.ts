@@ -153,6 +153,7 @@ export const HOST_CSS = `
 [data-socrate="pin"][data-state="resolved"]{opacity:.45}
 [data-socrate="pin"][data-probable]{border:2px dashed #09090b}
 [data-socrate="pin"]:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+[data-socrate="toolbar"] [data-count][data-mine]{background:#dc2626}
 [data-socrate="pin"] [data-count]{position:absolute;top:-7px;right:-9px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#fff;color:#09090b;font-size:10px;line-height:16px;text-align:center;box-shadow:0 0 0 1px rgb(0 0 0/.12)}
 [data-socrate="resize"]{all:initial;position:fixed;top:0;z-index:2147483001;width:9px;height:100vh;cursor:col-resize;touch-action:none}
 [data-socrate="resize"]::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:1px;background:transparent;transition:background .15s}
