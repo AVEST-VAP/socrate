@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { startBench, importDemo, call, sessionClient, threadsPath, key, rt, ISSUER, PROJECT, REVIEW, ORIGIN, type Bench, type Client } from './helpers.ts';
 
 const base = `/v1/projects/${PROJECT}/reviews/${REVIEW}`;
@@ -36,6 +37,9 @@ async function login(who: Client, agent = 'Claude'): Promise<{ token: string; gr
   return { token: g.json.accessToken, grant: g.json };
 }
 const agentClient = (token: string): Client => ({ url: bench.service.url, token });
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+const pngMeta = (name = 'preuve.png') => ({ name, contentType: 'image/png', size: PNG.length, sha256: createHash('sha256').update(PNG).digest('hex') });
+const attachments = `/v1/projects/${PROJECT}/reviews/${REVIEW}/attachments`;
 
 async function thread(c: Client, body: string): Promise<string> {
   const r = await call(c, 'POST', threadsPath, { kind: 'global', body }, { 'Idempotency-Key': key() });
@@ -238,7 +242,6 @@ test('refus du jeton délégué : Origin, création, pièces, état sans message
     ['créer un fil', 'POST', threadsPath, { kind: 'global', body: 'Nouveau fil' }],
     ['proposer une formulation', 'POST', threadsPath, { kind: 'global', body: '', proposal: { wordingId: 'x', replacement: 'y', revisionId: '0'.repeat(64) } }],
     ['créer un fil ciblé', 'POST', `${base}/targeted`, {}],
-    ['joindre une pièce', 'POST', `${base}/attachments`, { operation: 'message.create', attachments: [] }],
     ['archiver', 'POST', `${base}/archive`, {}],
     ['purger', 'POST', `/v1/projects/${PROJECT}/purge`, {}],
     ['importer', 'PUT', `${base}/deployments/agent-1`, {}],
@@ -252,7 +255,7 @@ test('refus du jeton délégué : Origin, création, pièces, état sans message
 
   const mine = await thread(claire, 'Mon fil.');
   const withPiece = await call(agent, 'POST', `${threadsPath}/${mine}/messages`, { body: 'x', attachments: [{ name: 'a.png', contentType: 'image/png', size: 1, sha256: '0'.repeat(64) }] }, { 'Idempotency-Key': key() });
-  assert.deepEqual([withPiece.status, withPiece.json.code], [403, 'forbidden'], 'réponse avec pièce');
+  assert.deepEqual([withPiece.status, withPiece.json.code], [409, 'attachment_missing'], 'une pièce non téléversée ne se publie pas');
   const state = await call(agent, 'PUT', `${threadsPath}/${mine}/state`, { state: 'resolved', expectedVersion: 0 }, { 'Idempotency-Key': key() });
   assert.equal(state.status, 403, 'changement d’état sans message');
   for (const body of [{}, { message: '' }, { message: '   ' }, { message: 'ok', commit: 'HEAD' }, { message: 'ok', commit: 'abc12' }, { message: 'ok', extra: 1 }]) {
@@ -341,4 +344,59 @@ test('politique recoupée à chaque usage : capacité retirée après l’approb
     await service.stop();
     await bench.startService();
   }
+});
+
+test('pièce d’agent : image sur une réponse ; ni vidéo, ni fil, ni au-delà des réservations en attente', async () => {
+  const { token } = await login(karim);
+  const agent = agentClient(token);
+  const reserve = (operation: string, list: unknown[]) => call(agent, 'POST', attachments, { operation, attachments: list }, { 'Idempotency-Key': key() });
+  assert.equal((await reserve('thread.create', [pngMeta()])).status, 403, 'un agent ne crée pas de fil');
+  assert.equal((await reserve('message.create', [{ ...pngMeta(), contentType: 'video/mp4' }])).status, 403, 'images seulement');
+  const id = await thread(claire, 'Retour à prouver.');
+  const k = key();
+  const r = await call(agent, 'POST', attachments, { operation: 'message.create', attachments: [pngMeta()] }, { 'Idempotency-Key': k });
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const put = await fetch(`${bench.service.url}${attachments}/${r.json.items[0].attachmentId}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png' }, body: PNG });
+  assert.equal(put.status, 200);
+  const m = await call(agent, 'POST', `${threadsPath}/${id}/messages`, { body: 'Voici le rendu.', attachments: [pngMeta()] }, { 'Idempotency-Key': k });
+  assert.equal(m.status, 201, JSON.stringify(m.json));
+  assert.deepEqual([m.json.via, m.json.attachments.length], ['Claude', 1]);
+  const four = [pngMeta('a.png'), pngMeta('b.png'), pngMeta('c.png'), pngMeta('d.png')];
+  const last = key();
+  await reserve('message.create', four);
+  await reserve('message.create', four);
+  const again = () => call(agent, 'POST', attachments, { operation: 'message.create', attachments: four }, { 'Idempotency-Key': last });
+  assert.equal((await again()).status, 201);
+  assert.equal((await reserve('message.create', [pngMeta('e.png')])).status, 429, 'réservations en attente plafonnées');
+  assert.equal((await again()).status, 201, 'une reprise de la même liste ne compte pas');
+  const racing = await Promise.all([1, 2, 3, 4].map(() => reserve('message.create', four)));
+  assert.ok(racing.every((r) => r.status === 429), 'plafond atomique, même à plusieurs');
+
+  // Une vidéo réservée par la session du même acteur ne passe pas par son agent.
+  const video = await sessionClient(bench, { deploymentId: 'local-1', sub: 'vidz', name: 'Vidz', capabilities: ['thread.participate'] });
+  const own = await login(video);
+  const vid = { name: 'v.mp4', contentType: 'video/mp4', size: 40, sha256: '0'.repeat(64) };
+  const k2 = key();
+  const held = await call(video, 'POST', attachments, { operation: 'message.create', attachments: [vid] }, { 'Idempotency-Key': k2 });
+  assert.equal(held.status, 201);
+  const upload = await fetch(`${bench.service.url}${attachments}/${held.json.items[0].attachmentId}`, { method: 'PUT', headers: { Authorization: `Bearer ${own.token}`, 'Content-Type': 'video/mp4' }, body: new Uint8Array(40) });
+  assert.equal(upload.status, 403, 'téléversement refusé à l’agent');
+  assert.equal((await call(agentClient(own.token), 'POST', `${threadsPath}/${id}/messages`, { body: 'x', attachments: [vid] }, { 'Idempotency-Key': k2 })).status, 403, 'publication refusée à l’agent');
+});
+
+test('mise à jour des droits : explicite, depuis une session de l’acteur, jamais pour un autre', async () => {
+  const limited = await sessionClient(bench, { deploymentId: 'local-1', sub: 'mina', name: 'Mina', capabilities: ['thread.participate'] });
+  const { token, grant } = await login(limited);
+  assert.ok(!grant.capabilities.includes('thread.moderate'));
+  const id = await thread(claire, 'Retour d’une autre personne.');
+  const refused = await call(agentClient(token), 'POST', `${threadsPath}/${id}/resolve`, { message: 'Corrigé.' }, { 'Idempotency-Key': key() });
+  assert.equal(refused.status, 403, 'sans modération, pas de résolution du fil d’autrui');
+  const path = `/v1/projects/${PROJECT}/agents/${grant.tokenId}/refresh`;
+  assert.equal((await call(agentClient(token), 'POST', path)).status, 403, 'un agent ne met pas à jour ses droits');
+  assert.equal((await call(claire, 'POST', path)).status, 404, 'le jeton d’une autre personne reste introuvable');
+  const promoted = await sessionClient(bench, { deploymentId: 'local-1', sub: 'mina', name: 'Mina', capabilities: ['thread.participate', 'thread.moderate'] });
+  const up = await call(promoted, 'POST', path);
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  assert.ok(up.json.capabilities.includes('thread.moderate'));
+  assert.equal((await call(agentClient(token), 'POST', `${threadsPath}/${id}/resolve`, { message: 'Corrigé.' }, { 'Idempotency-Key': key() })).status, 201, 'droit effectif après le clic');
 });

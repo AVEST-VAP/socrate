@@ -186,6 +186,7 @@ A typical loop for the agent:
 ```sh
 npx @meyer0x/socrate threads --json                          # open threads of the current branch's pull request
 npx @meyer0x/socrate threads --for-agent                     # threads you handed to your agent with @agent
+npx @meyer0x/socrate reply <id> "Here it is." --attach after.png  # PNG, JPEG or WebP
 npx @meyer0x/socrate thread <id> --captures .socrate --json  # messages, target (route, text, selector, HTML) and downloaded screenshot
 # … fix the code, commit …
 npx @meyer0x/socrate reply <id> "Moved the save button out of the modal."
@@ -211,7 +212,7 @@ socrate preview register --url <deployed preview URL> [--config socrate.yml]
 socrate check-absent <build output directory> [--config socrate.yml]
 socrate login [--agent <name>] [--config socrate.yml] [--json]
 socrate logout [--agent <name>] [--config socrate.yml] [--json]
-socrate threads [--pr <n> | --review <key>] [--state open|resolved|all] [--agent <name>] [--json]
+socrate threads [--pr <n> | --review <key>] [--state open|resolved|all | --for-agent] [--agent <name>] [--json]
 socrate thread <id> [--pr <n> | --review <key>] [--captures <dir>] [--agent <name>] [--json]
 socrate reply <id> <message | -> [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
 socrate resolve <id> --message <text | -> [--commit <sha> | --no-commit] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]

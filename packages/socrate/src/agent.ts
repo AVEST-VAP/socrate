@@ -1,11 +1,11 @@
 // Commandes des agents de code : connexion déléguée par code affiché (device flow), puis lecture, réponse, résolution et réouverture des retours.
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
-import { commitShaSchema, deviceStartSchema, handoffOf, stableId, type AgentGrant, type ApiError, type DeviceStart, type Message, type ThreadPage, type ThreadWithMessages } from '@socrate/contract';
+import { ATTACHMENT_TYPES, MAX_ATTACHMENTS, SIGNATURE_BYTES, commitShaSchema, deviceStartSchema, handoffOf, safeName, signatureMatches, stableId, type AttachmentMeta, type AttachmentReservation, type AgentGrant, type ApiError, type DeviceStart, type Message, type ThreadPage, type ThreadWithMessages } from '@socrate/contract';
 import { loadConfig, renderReviewKey, type LoadedConfig } from './config.ts';
 import { credentialsPath, readTokens, sameSlot, writeTokens, type StoredToken } from './credentials.ts';
 import { CliError, secrets, type Io } from './io.ts';
@@ -17,14 +17,14 @@ export const AGENT_USAGE = `  socrate login [--agent <name>] [--config socrate.y
   socrate logout [--agent <name>] [--config socrate.yml] [--json]
   socrate threads [--pr <n> | --review <key>] [--state open|resolved|all | --for-agent] [--agent <name>] [--json]
   socrate thread <id> [--pr <n> | --review <key>] [--captures <dir>] [--agent <name>] [--json]
-  socrate reply <id> <message | -> [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
+  socrate reply <id> <message | -> [--attach <image>]... [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
   socrate resolve <id> --message <text | -> [--commit <sha> | --no-commit] [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
   socrate reopen <id> --message <text | -> [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]`;
 
 const OPTIONS = {
   config: { type: 'string' }, agent: { type: 'string' }, json: { type: 'boolean' }, pr: { type: 'string' }, review: { type: 'string' },
   state: { type: 'string' }, captures: { type: 'string' }, message: { type: 'string' }, commit: { type: 'string' }, 'no-commit': { type: 'boolean' },
-  key: { type: 'string' }, 'for-agent': { type: 'boolean' }, after: { type: 'string' },
+  key: { type: 'string' }, 'for-agent': { type: 'boolean' }, after: { type: 'string' }, attach: { type: 'string', multiple: true },
 } as const;
 type Values = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>['values'];
 
@@ -46,13 +46,14 @@ type Ctx = { io: Io; config: LoadedConfig; values: Values; out: (human: string, 
 type Reply = { status: number; body: unknown; bytes: Uint8Array };
 
 /** Une requête au service, sans en-tête Origin, sans redirection ; le jeton ne passe que dans `Authorization`. */
-async function request(ctx: Ctx, method: string, path: string, init: { token?: string; body?: unknown; key?: string } = {}): Promise<Reply> {
+async function request(ctx: Ctx, method: string, path: string, init: { token?: string; body?: unknown; key?: string; bytes?: { data: Uint8Array; type: string } } = {}): Promise<Reply> {
   const headers: Record<string, string> = { 'User-Agent': 'socrate-cli' };
   if (init.token) headers.Authorization = `Bearer ${init.token}`;
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (init.bytes) headers['Content-Type'] = init.bytes.type;
   if (init.key) headers['Idempotency-Key'] = init.key;
   const url = `${ctx.config.service}${path}`;
-  const res = await fetch(url, { method, headers, body: init.body === undefined ? undefined : JSON.stringify(init.body), redirect: 'error', signal: AbortSignal.timeout(30_000) })
+  const res = await fetch(url, { method, headers, body: init.bytes ? new Blob([init.bytes.data as Uint8Array<ArrayBuffer>]) : (init.body === undefined ? undefined : JSON.stringify(init.body)), redirect: 'error', signal: AbortSignal.timeout(init.bytes ? 120_000 : 30_000) })
     .catch((e: Error) => { throw new CliError(`Socrate service unreachable (${method} ${url}): ${e.cause instanceof Error ? e.cause.message : e.message}`); });
   if (res.status === 401 && init.token) forget(ctx, init.token);
   const bytes = new Uint8Array(await res.arrayBuffer());
@@ -89,8 +90,7 @@ const KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
  * perdue ou un refus réessayable relance la même requête, que le service reconnaît au lieu d'écrire deux fois. Si l'issue
  * reste inconnue (réseau, 5xx), la clé est rendue : relancer avec `--key` ne duplique pas une écriture peut-être faite.
  */
-async function write<T>(ctx: Ctx, what: string, path: string, token: string, body: unknown): Promise<T> {
-  const key = ctx.values.key ?? `socrate-cli-${randomUUID()}`;
+async function write<T>(ctx: Ctx, what: string, path: string, token: string, body: unknown, key = ctx.values.key ?? `socrate-cli-${randomUUID()}`): Promise<T> {
   let last: CliError | null = null;
   let unknown = false;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -340,13 +340,54 @@ async function checkAfter(ctx: Ctx, token: string, review: string, id: string): 
   if (newer) throw new CliError(printable(`${newer.author.displayName} wrote message ${newer.seq} after message ${after}: read the thread again, nothing was written`));
 }
 
+type Piece = AttachmentMeta & { data: Uint8Array };
+
+/** Images locales à joindre, reconnues à leurs octets et non à leur extension : une consigne lue dans un fil ne fait jamais sortir un fichier quelconque. */
+function readPieces(ctx: Ctx): Piece[] {
+  const files = ctx.values.attach ?? [];
+  if (files.length > MAX_ATTACHMENTS) throw usage(`--attach: ${MAX_ATTACHMENTS} images at most`);
+  return files.map((file) => {
+    let data: Uint8Array;
+    try {
+      data = readFileSync(resolve(ctx.io.cwd, file));
+    } catch (e) {
+      throw new CliError(`--attach ${file}: ${(e as Error).message}`);
+    }
+    const contentType = (['image/png', 'image/jpeg', 'image/webp'] as const).find((t) => signatureMatches(t, data.subarray(0, SIGNATURE_BYTES)));
+    if (!contentType) throw new CliError(`--attach ${file}: not a PNG, JPEG or WebP image`);
+    if (data.length > ATTACHMENT_TYPES[contentType].maxBytes) throw new CliError(`--attach ${file}: larger than the ${ATTACHMENT_TYPES[contentType].maxBytes} bytes allowed`);
+    return { name: safeName(basename(file)) || 'capture', contentType, size: data.length, sha256: sha256(data), data };
+  });
+}
+
+/** Réservation et téléversement sous la clé de la réponse : relancer avec `--key` reprend les pièces déjà reçues sans doublon. */
+async function upload(ctx: Ctx, token: string, review: string, key: string, pieces: Piece[]): Promise<AttachmentMeta[]> {
+  const metas = pieces.map(({ data: _, ...meta }) => meta);
+  const reserved = await request(ctx, 'POST', `${base(ctx, review)}/attachments`, { token, key, body: { operation: 'message.create', attachments: metas } });
+  if (reserved.status !== 201) throw refused(reserved, 'the attachments');
+  const { items } = reserved.body as AttachmentReservation;
+  for (const [i, item] of items.entries()) {
+    if (item.uploaded) continue;
+    const put = await request(ctx, 'PUT', `${base(ctx, review)}/attachments/${encodeURIComponent(item.attachmentId)}`, { token, bytes: { data: pieces[i]!.data, type: pieces[i]!.contentType } });
+    if (put.status !== 200) throw refused(put, `the upload of ${pieces[i]!.name}`);
+  }
+  return metas;
+}
+
 async function reply(ctx: Ctx, id: string | undefined, value: string | undefined): Promise<void> {
   if (!id) throw usage('socrate reply <id> <message | ->');
   const t = pickToken(ctx);
+  const pieces = readPieces(ctx);
   const body = await text(ctx, value, 'the message');
   const review = await reviewKey(ctx);
   await checkAfter(ctx, t.token, review, id);
-  const m = await write<Message>(ctx, 'the reply', `${base(ctx, review)}/threads/${encodeURIComponent(id)}/messages`, t.token, { body });
+  const key = ctx.values.key ?? `socrate-cli-${randomUUID()}`;
+  const send = async () => {
+    const attachments = pieces.length ? await upload(ctx, t.token, review, key, pieces) : undefined;
+    return write<Message>(ctx, 'the reply', `${base(ctx, review)}/threads/${encodeURIComponent(id)}/messages`, t.token, { body, ...(attachments && { attachments }) }, key);
+  };
+  // Une réservation expirée entre l'envoi et la publication reprend toute la séquence, une fois, sous la même clé.
+  const m = await send().catch((e: Error) => { if (pieces.length && e.message.includes('attachment_missing')) return send(); throw e; });
   ctx.out(`replied to ${id} as ${m.author.displayName} via ${m.via}`, m);
 }
 
@@ -358,7 +399,11 @@ async function transition(ctx: Ctx, id: string | undefined, state: 'resolve' | '
   const commit = state === 'resolve' ? await commitOf(ctx) : null;
   const review = await reviewKey(ctx);
   await checkAfter(ctx, t.token, review, id);
-  const m = await write<Message>(ctx, `the ${state === 'resolve' ? 'resolution' : 'reopening'}`, `${base(ctx, review)}/threads/${encodeURIComponent(id)}/${state}`, t.token, { message, ...(commit && { commit }) });
+  const m = await write<Message>(ctx, `the ${state === 'resolve' ? 'resolution' : 'reopening'}`, `${base(ctx, review)}/threads/${encodeURIComponent(id)}/${state}`, t.token, { message, ...(commit && { commit }) }).catch((e: Error) => {
+    // Un refus de droits sur le fil d'une autre personne dit quoi faire, sans relancer de connexion à l'aveugle.
+    if (!/ 403 /.test(e.message) || t.capabilities.includes('thread.moderate')) throw e;
+    throw new CliError(printable(`${e.message}\n${t.agent} can only ${state} threads of ${t.actor.displayName}. If you may moderate this project, open Socrate in a preview, choose "Plus d’options", "Connecter un agent", then "Mettre à jour" next to ${t.agent}, and run the command again.`));
+  });
   ctx.out(`${state === 'resolve' ? 'resolved' : 'reopened'} ${id} as ${m.author.displayName} via ${m.via}${m.transition?.commit ? ` in ${m.transition.commit.slice(0, 7)}${liveNote(m.transition)}` : ''}`, m);
 }
 
@@ -372,6 +417,7 @@ export async function runAgent(command: string, argv: string[], io: Io): Promise
   if (positionals.length > max || rest.length) throw usage(`unexpected argument ${JSON.stringify(positionals[max])}`);
   if (values.key !== undefined && !['reply', 'resolve', 'reopen'].includes(command)) throw usage(`${command} takes no --key`);
   if (values['for-agent'] && command !== 'threads') throw usage(`${command} takes no --for-agent`);
+  if (values.attach !== undefined && command !== 'reply') throw usage(`${command} takes no --attach`);
   if (values.after !== undefined && !['reply', 'resolve', 'reopen'].includes(command)) throw usage(`${command} takes no --after`);
   if (values.key !== undefined && !KEY_PATTERN.test(values.key)) throw usage(`--key ${JSON.stringify(values.key)}: 8 to 128 letters, digits, dashes or underscores`);
   if (command === 'login') return login(ctx);

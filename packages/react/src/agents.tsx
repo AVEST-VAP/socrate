@@ -49,7 +49,7 @@ type Step =
  * « Connecter un agent » : code affiché par `npx @meyer0x/socrate login`, détails relus au service, avertissement, puis décision explicite ; « Mes agents » liste
  * et révoque les jetons délégués de la personne connectée. Chargé seulement quand on l'ouvre.
  */
-export function AgentsView({ client, onBack, onClose, headingRef }: { client: ReviewClient; onBack: () => void; onClose: () => void; headingRef: RefObject<HTMLHeadingElement | null> }) {
+export function AgentsView({ client, canModerate, onBack, onClose, headingRef }: { client: ReviewClient; canModerate: boolean; onBack: () => void; onClose: () => void; headingRef: RefObject<HTMLHeadingElement | null> }) {
   const [code, setCode] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'idle' });
   const [agents, setAgents] = useState<AgentToken[] | null>(null);
@@ -125,6 +125,15 @@ export function AgentsView({ client, onBack, onClose, headingRef }: { client: Re
     }
   };
 
+  const refresh = async (a: AgentToken) => {
+    try {
+      const { capabilities } = await projectCall<{ capabilities: AgentToken['capabilities'] }>(client, `/agents/${encodeURIComponent(a.tokenId)}/refresh`, 'POST');
+      setAgents((list) => list?.map((x) => (x.tokenId === a.tokenId ? { ...x, capabilities } : x)) ?? null);
+    } catch (e) {
+      setListError(reason(e));
+    }
+  };
+
   return (
     <div className="socrate-panel socrate-agents" data-testid="socrate-agents" onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented) onClose(); }}>
       <style>{AGENTS_CSS}</style>
@@ -150,7 +159,7 @@ export function AgentsView({ client, onBack, onClose, headingRef }: { client: Re
           {step.kind === 'done' && <p className="socrate-status" data-kind="success" role="status" data-testid="socrate-agent-done">{step.text}</p>}
           {step.kind === 'details' && (
             <div className="socrate-card" data-testid="socrate-device">
-              <p><strong>Autoriser {step.details.agent} sur {step.details.machine} à lire, répondre et résoudre en votre nom sur {project} ?</strong></p>
+              <p><strong>Autoriser {step.details.agent} sur {step.details.machine} à lire, répondre, joindre des images et résoudre en votre nom sur {project} ?</strong></p>
               <p className="socrate-meta">Code {formatUserCode(normalizeUserCode(step.details.userCode))} · demandé le {date(step.details.createdAt)} · valable jusqu’à {date(step.details.expiresAt)}. L’accès dure 30 jours et se révoque ici.</p>
               <p className="socrate-status" data-kind="error">N’approuvez que si vous venez de lancer cette commande.</p>
               <div className="socrate-actions">
@@ -171,6 +180,10 @@ export function AgentsView({ client, onBack, onClose, headingRef }: { client: Re
                 <div>
                   <strong>{a.agent}</strong> sur {a.machine}
                   <div className="socrate-meta">Connecté le {date(a.createdAt)} · {a.lastUsedAt ? `utilisé le ${date(a.lastUsedAt)}` : 'jamais utilisé'} · expire le {date(a.expiresAt)}</div>
+                  {canModerate && !a.capabilities.includes('thread.moderate') && <div className="socrate-meta" data-testid="socrate-agent-stale">
+                    Cet agent ne peut pas résoudre les retours des autres.{' '}
+                    <button type="button" className="socrate-button link" onClick={() => void refresh(a)} aria-label={`Mettre à jour les droits de ${a.agent} sur ${a.machine}`}>Mettre à jour</button>
+                  </div>}
                 </div>
                 <button type="button" className="socrate-button secondary" onClick={() => void revoke(a)} aria-label={`Révoquer ${a.agent} sur ${a.machine}`}>Révoquer</button>
               </li>

@@ -6,12 +6,12 @@ import { actorKey, authenticate, grantedCapabilities, randomToken, requireCapabi
 import { isConstraintViolation } from './d1.ts';
 import { deploymentOriginMatches, importDeployment, isRegisteredOrigin, readDeployment, readRevision, revokeDeployment } from './reviews.ts';
 import { getThread, listThreads, publish, reply, setState, transition, type ParticipantScope, type WriterScope } from './threads.ts';
-import { decideDevice, deviceDetails, exchangeDevice, listAgents, revokeAgent, revokeSelf, startDevice } from './agents.ts';
+import { decideDevice, deviceDetails, exchangeDevice, listAgents, refreshAgent, revokeAgent, revokeSelf, startDevice } from './agents.ts';
 import { commitTargeted, readCapture, reclaimExpired, recognize, reserve, upload } from './captures.ts';
 import { revisionOf } from './wordings.ts';
 import { changesPage, listPage, listReviews } from './sync.ts';
 import { archiveReview, archiver, MANUAL_PURGE } from './purge.ts';
-import { readAttachment, reclaimExpiredAttachments, reserveAttachments, uploadAttachment } from './attachments.ts';
+import { checkAgentAttachments, readAttachment, reclaimExpiredAttachments, reserveAttachments, uploadAttachment } from './attachments.ts';
 
 /** Chemin de l'entrée `mount` de ce build, fixé par `build-worker.ts`. */
 declare const __SOCRATE_CLIENT__: string;
@@ -165,6 +165,7 @@ async function route(env: Env, request: Request): Promise<Response> {
     const principal = await authenticate(env, request);
     if (seg.length === 4 && method === 'GET') return json({ items: await listAgents(env, principal, seg[2]) });
     if (seg.length === 6 && seg[4] && seg[5] === 'revoke' && method === 'POST') return json(await revokeAgent(env, principal, seg[2], seg[4]));
+    if (seg.length === 6 && seg[4] && seg[5] === 'refresh' && method === 'POST') return json(await refreshAgent(env, principal, seg[2], seg[4]));
   }
 
   if (seg[1] === 'projects' && seg[3] === 'purge' && seg[2] && seg.length === 4 && method === 'POST') {
@@ -236,9 +237,10 @@ async function route(env: Env, request: Request): Promise<Response> {
       }
     }
     if (seg[5] === 'attachments' && seg.length === 6 && method === 'POST') {
-      const scope = participant(principal, 'joindre une pièce');
+      const scope = writer(principal, reviewKey);
       const key = idempotencyKey(request);
       const body = await parsed(attachmentReservationSchema, request, 'pièces jointes invalides');
+      if (scope.via !== null) checkAgentAttachments(body.operation, body.attachments.map((a) => a.contentType));
       return json(await reserveAttachments(env, { scope, key, operation: body.operation, attachments: body.attachments }), 201);
     }
     if (seg[5] === 'attachments' && seg[6] && seg.length === 7) {
@@ -247,7 +249,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         return readAttachment(env, projectId, reviewKey, seg[6]);
       }
       if (method === 'PUT') {
-        const scope = participant(principal, 'joindre une pièce');
+        const scope = writer(principal, reviewKey);
         const length = request.headers.get('Content-Length');
         // Une pièce par requête, lue en flux : jamais plusieurs vidéos en mémoire dans le Worker.
         await uploadAttachment(env, { scope, attachmentId: seg[6], contentType: request.headers.get('Content-Type') ?? '', declaredLength: length === null ? null : Number(length), body: request.body });
@@ -295,7 +297,7 @@ async function route(env: Env, request: Request): Promise<Response> {
         const scope = writer(principal, reviewKey);
         const key = idempotencyKey(request);
         const body = await parsed(newMessageSchema, request, 'réponse invalide');
-        if (scope.via !== null && body.attachments?.length) throw new HttpError(403, 'forbidden', 'un agent délégué ne peut pas joindre une pièce');
+        if (scope.via !== null && body.attachments) checkAgentAttachments('message.create', body.attachments.map((a) => a.contentType));
         const r = await reply(env, { scope, key, threadId, body: body.body, attachments: body.attachments });
         return json(r.message, r.created ? 201 : 200);
       }

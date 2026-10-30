@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { REPO_ROOT, localPath } from '../../../tools/local/local-run.ts';
@@ -272,6 +272,23 @@ test('--for-agent : seules les consignes de la personne connectée en attente ; 
   assert.deepEqual(JSON.parse(after.stdout).threads, [], 'consigne annulée par la réponse de Claire');
   const ok = await cli(['reply', id, 'Compris, je ne change rien.', '--after', String(seq + 1), '--review', REVIEW, '--agent', 'Claude']);
   assert.equal(ok.code, 0, ok.stderr);
+});
+
+test('reply --attach : image reconnue à ses octets, relue par son empreinte ; un autre fichier ne part pas', async () => {
+  const id = await thread(claire, 'Le champ manque de contraste.');
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(64)]);
+  const file = join(repo, 'apres.png');
+  writeFileSync(file, png);
+  const r = await cli(['reply', id, 'Corrigé, voici le rendu.', '--attach', file, '--review', REVIEW, '--agent', 'Claude', '--json']);
+  assert.equal(r.code, 0, r.stderr);
+  const m = JSON.parse(r.stdout);
+  assert.deepEqual([m.via, m.attachments.length, m.attachments[0].contentType, m.attachments[0].sha256], ['Claude', 1, 'image/png', sha(png)]);
+  const fake = join(repo, 'secret.png');
+  writeFileSync(fake, 'TOKEN=abc');
+  const refused = await cli(['reply', id, 'Non.', '--attach', fake, '--review', REVIEW, '--agent', 'Claude']);
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /not a PNG, JPEG or WebP image/);
+  assert.equal((await call(karim, 'GET', `${threadsPath}/${id}`)).json.messages.length, 2, 'rien d’écrit pour un faux fichier');
 });
 
 test('écriture incertaine : la clé est rendue, la relance avec --key ne duplique pas ; mêmes messages, écritures distinctes', async () => {
