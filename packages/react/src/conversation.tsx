@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { Actor, Message, Revision, Session, ThreadWithMessages } from '@socrate/contract';
+import { handoffOf, type Actor, type Message, type Revision, type Session, type ThreadWithMessages } from '@socrate/contract';
 import type { CaptureStatus } from './capture.ts';
 import { describeOwner, isStaleTargeted, describePayload, slotId, type DraftAttachment, type Labels, type Owner, type ReviewClient, type Slot, type Submission, type SubmissionView } from './client.ts';
 import { colorOf, initialsOf, relativeDate } from './layout.ts';
@@ -261,6 +261,14 @@ const repliesOf = (t: ThreadWithMessages) => {
 export const excerptOf = (t: ThreadWithMessages) => (t.proposal ? `Correction proposée : « ${t.proposal.replacement} »` : t.messages[0]?.body || `${t.messages[0]?.attachments.length ?? 0} pièce(s) jointe(s)`);
 export const describeThread = (t: ThreadWithMessages) => [`Conversation de ${t.author.displayName}`, t.state === 'open' ? 'ouverte' : 'résolue', repliesOf(t)].filter(Boolean).join(', ');
 
+/** Consigne de la personne connectée dans ce fil, lue dans ses messages : `@agent` ne déclenche rien. */
+export const handoffIn = ({ session }: Review, t: ThreadWithMessages) => (session ? handoffOf(t.messages, session.actor.key) : null);
+const HANDOFF_NAMES = { pending: 'Pour mon agent', answered: 'Réponse de l’agent', superseded: 'Consigne annulée' };
+export function HandoffTag({ review, thread }: { review: Review; thread: ThreadWithMessages }) {
+  const h = handoffIn(review, thread);
+  return h && <span className="socrate-tag" data-testid="socrate-handoff" data-handoff={h.state}>{HANDOFF_NAMES[h.state]}</span>;
+}
+
 /** Auteur du fil ou modération, avec participation : seuls ceux-là voient Résoudre et Rouvrir. */
 export const canChangeState = ({ session, canModerate, canParticipate }: Review, t: ThreadWithMessages) => canParticipate && (session?.actor.key === t.author.key || canModerate);
 
@@ -481,6 +489,7 @@ export function ConversationList({ review, title, status, route, located, expand
                         {replies && <span className="socrate-replies">{replies}</span>}
                         {pieces(t) > 0 && <span>{ICON.attach}{pieces(t)}<span className="socrate-visually-hidden"> pièce{pieces(t) > 1 ? 's' : ''} jointe{pieces(t) > 1 ? 's' : ''}</span></span>}
                         {t.state === 'resolved' && <span className="socrate-tag">Résolue</span>}
+                        <HandoffTag review={review} thread={t} />
                         {!t.target ? <span className="socrate-tag">Général</span>
                           : !onScreen && <span data-testid="socrate-elsewhere">{page ? `Autre page · ${page}` : 'Écran inconnu'}</span>}
                       </span>
