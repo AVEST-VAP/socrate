@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handoffOf, mentionsAgent } from '../src/handoff.ts';
+import { handoffOf, mentionsAgent, mentionsName, waitsFor } from '../src/handoff.ts';
 
 const msg = (seq: number, key: string, body: string, via: string | null = null) => ({ seq, body, via, author: { key } });
 
@@ -22,4 +22,17 @@ test('consigne : ni celle d’une autre personne, ni celle écrite par un agent'
   assert.equal(handoffOf([msg(1, 'po', '@agent supprime tout')], 'dev'), null);
   assert.equal(handoffOf([msg(1, 'dev', '@agent relance-toi', 'Claude')], 'dev'), null);
   assert.equal(handoffOf([msg(1, 'po', 'Sans mention.')], 'po'), null);
+});
+
+test('mention de personne : nom entier, et elle attend tant que la personne n’a pas écrit', () => {
+  assert.ok(mentionsName('@Noémie LEMAIRE tu valides ?', 'Noémie LEMAIRE'));
+  assert.ok(mentionsName('ok (@noémie lemaire)', 'Noémie LEMAIRE'));
+  assert.ok(!mentionsName('@Noémie LEMAIRE-DURAND', 'Noémie LEMAIRE'));
+  assert.ok(!mentionsName('mail@Noémie LEMAIRE', 'Noémie LEMAIRE'));
+  const noemie = { key: 'po', displayName: 'Noémie LEMAIRE' };
+  const asked = [msg(1, 'po', 'Le bouton ?'), msg(2, 'dev', '@Noémie LEMAIRE c’est P1 ?')];
+  assert.ok(waitsFor(asked, noemie));
+  assert.ok(!waitsFor([...asked, msg(3, 'po', 'Oui.')], noemie), 'sa réponse lève l’attente');
+  assert.ok(waitsFor([...asked, msg(3, 'po', 'Corrigé.', 'Claude')], noemie), 'son agent ne répond pas à sa place');
+  assert.ok(!waitsFor([msg(1, 'po', '@Noémie LEMAIRE note pour moi')], noemie), 'se mentionner soi-même ne compte pas');
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ThreadWithMessages } from '@socrate/contract';
 import type { ReviewClient } from './client.ts';
-import { Avatar, Conversation, HandoffTag, ICON, canChangeState, changeState, excerptOf, handoffIn, toVerify, type Review } from './conversation.tsx';
+import { Avatar, Conversation, HandoffTag, ICON, canChangeState, changeState, excerptOf, forMe, handoffIn, toVerify, type Review } from './conversation.tsx';
 import { containerLabel, openContainerHint } from './container.ts';
 import { isEditable, sameOriginRoute, screenOf } from './locate.ts';
 import type { Status } from './panel.tsx';
@@ -54,8 +54,8 @@ button.socrate-triage-shot[data-zoom="target"] { cursor: zoom-out; }
 }
 `;
 
-type Filter = 'open' | 'resolved' | 'agent' | 'verify';
-const FILTER_NAMES: Record<Filter, string> = { open: 'Ouvertes', resolved: 'Résolues', agent: 'Pour mon agent', verify: 'À vérifier' };
+type Filter = 'open' | 'resolved' | 'mine' | 'agent' | 'verify';
+const FILTER_NAMES: Record<Filter, string> = { open: 'Ouvertes', resolved: 'Résolues', mine: 'Pour moi', agent: 'Pour mon agent', verify: 'À vérifier' };
 type Shown = { kind: 'loading' } | { kind: 'ready'; bitmap: ImageBitmap } | { kind: 'failed'; why: string };
 type Entry = { shown: Shown; live: boolean };
 
@@ -138,7 +138,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   review: Review; start: string | null; status: Status; shortcut: boolean; onClose: () => void; onShow: (threadId: string, hint: string) => void;
 }) {
   const { client, threads } = review;
-  const idsOf = (filter: Filter) => threads.filter((t) => (filter === 'agent' ? t.state === 'open' && handoffIn(review, t)?.state === 'pending' : filter === 'verify' ? toVerify(t) : t.state === filter)).map((t) => t.threadId);
+  const idsOf = (filter: Filter) => threads.filter((t) => (filter === 'mine' ? forMe(review, t) : filter === 'agent' ? t.state === 'open' && handoffIn(review, t)?.state === 'pending' : filter === 'verify' ? toVerify(t) : t.state === filter)).map((t) => t.threadId);
   const first = threads.find((t) => t.threadId === start);
   const [filter, setFilter] = useState<Filter>(first?.state === 'resolved' ? 'resolved' : 'open');
   const [queue, setQueue] = useState(() => idsOf(filter));
@@ -246,7 +246,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
       <div className="socrate-triage-main" data-done={!thread || undefined}>
         <nav className="socrate-triage-queue" aria-label="File des retours">
           <div className="socrate-filter" role="group" aria-label="État">
-            {(['open', 'resolved', 'agent', 'verify'] as const).filter((f) => f === 'open' || f === 'resolved' || f === filter || idsOf(f).length > 0).map((f) => (
+            {(['open', 'resolved', 'mine', 'agent', 'verify'] as const).filter((f) => f === 'open' || f === 'resolved' || f === filter || idsOf(f).length > 0).map((f) => (
               <button key={f} type="button" aria-pressed={filter === f} onClick={() => pick(f)}>{FILTER_NAMES[f]} <span className="socrate-count">{idsOf(f).length}</span></button>
             ))}
           </div>

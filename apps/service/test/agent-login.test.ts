@@ -400,3 +400,16 @@ test('mise à jour des droits : explicite, depuis une session de l’acteur, jam
   assert.ok(up.json.capabilities.includes('thread.moderate'));
   assert.equal((await call(agentClient(token), 'POST', `${threadsPath}/${id}/resolve`, { message: 'Corrigé.' }, { 'Idempotency-Key': key() })).status, 201, 'droit effectif après le clic');
 });
+
+test('personnes à mentionner : auteurs du projet, session seulement, sans lecteur de passage', async () => {
+  const lurker = await sessionClient(bench, { deploymentId: 'local-1', sub: 'passant', name: 'Passant' });
+  await thread(claire, 'Un auteur du projet.');
+  const r = await call(lurker, 'GET', `/v1/projects/${PROJECT}/people`);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const names = r.json.items.map((p: { displayName: string }) => p.displayName);
+  assert.ok(names.includes('Claire Morel'), JSON.stringify(names));
+  assert.ok(!names.includes('Passant'), 'ouvrir le panneau ne rend pas mentionnable');
+  const { token } = await login(karim);
+  assert.equal((await call(agentClient(token), 'GET', `/v1/projects/${PROJECT}/people`)).status, 403, 'un agent ne lit pas la liste');
+  assert.equal((await call(lurker, 'GET', '/v1/projects/autre/people')).status, 403);
+});

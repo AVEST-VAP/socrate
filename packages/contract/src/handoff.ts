@@ -18,3 +18,26 @@ export function handoffOf(messages: readonly HandoffMessage[], actorKey: string)
   }
   return null;
 }
+
+const fold = (t: string) => t.toLocaleLowerCase('fr');
+/** `@Prénom Nom` en entier dans le texte, sans suite de nom. Une mention est du texte : elle prévient, elle ne donne aucun droit. */
+export function mentionsName(body: string, displayName: string): boolean {
+  const text = fold(body);
+  const name = `@${fold(displayName)}`;
+  for (let i = text.indexOf(name); i >= 0; i = text.indexOf(name, i + 1)) {
+    const before = text[i - 1];
+    const after = text.slice(i + name.length);
+    if ((before === undefined || /[\s(]/.test(before)) && !/^[\p{L}\p{N}_-]/u.test(after)) return true;
+  }
+  return false;
+}
+
+/** Une autre personne attend cette personne : mentionnée dans un message, et elle n'a rien écrit depuis. Les messages d'agent en son nom ne comptent pas comme sa réponse. */
+export function waitsFor(messages: readonly HandoffMessage[], actor: { key: string; displayName: string }): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.author.key === actor.key && !m.via) return false;
+    if (m.author.key !== actor.key && mentionsName(m.body, actor.displayName)) return true;
+  }
+  return false;
+}

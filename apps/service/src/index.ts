@@ -6,7 +6,7 @@ import { actorKey, authenticate, grantedCapabilities, randomToken, requireCapabi
 import { isConstraintViolation } from './d1.ts';
 import { deploymentOriginMatches, importDeployment, isRegisteredOrigin, readDeployment, readRevision, revokeDeployment } from './reviews.ts';
 import { getThread, listThreads, publish, reply, setState, transition, type ParticipantScope, type WriterScope } from './threads.ts';
-import { decideDevice, deviceDetails, exchangeDevice, listAgents, refreshAgent, revokeAgent, revokeSelf, startDevice } from './agents.ts';
+import { decideDevice, deviceDetails, exchangeDevice, listAgents, listPeople, refreshAgent, revokeAgent, revokeSelf, startDevice } from './agents.ts';
 import { commitTargeted, readCapture, reclaimExpired, recognize, reserve, upload } from './captures.ts';
 import { revisionOf } from './wordings.ts';
 import { changesPage, listPage, listReviews } from './sync.ts';
@@ -166,6 +166,10 @@ async function route(env: Env, request: Request): Promise<Response> {
     if (seg.length === 4 && method === 'GET') return json({ items: await listAgents(env, principal, seg[2]) });
     if (seg.length === 6 && seg[4] && seg[5] === 'revoke' && method === 'POST') return json(await revokeAgent(env, principal, seg[2], seg[4]));
     if (seg.length === 6 && seg[4] && seg[5] === 'refresh' && method === 'POST') return json(await refreshAgent(env, principal, seg[2], seg[4]));
+  }
+
+  if (seg[1] === 'projects' && seg[2] && seg[3] === 'people' && seg.length === 4 && method === 'GET') {
+    return json({ items: await listPeople(env, await authenticate(env, request), seg[2]) });
   }
 
   if (seg[1] === 'projects' && seg[3] === 'purge' && seg[2] && seg.length === 4 && method === 'POST') {

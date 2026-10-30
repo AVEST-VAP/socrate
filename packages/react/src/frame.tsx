@@ -7,7 +7,7 @@ import { HOST_CSS, PANEL_CSS } from './styles.ts';
 import type { SocrateReviewProps } from './index.tsx';
 import { admissibleRange, afterNavigation, aimsAtSelection, cleanText, currentSelection, findTarget, inContext, isEditable, isSocrate, nearbyText, offsetOf, rectOf, roleOf, sameOriginFrames, sameOriginRoute, screenOf, type Spot } from './locate.ts';
 import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, hull, initialsOf, listBounds, listWidthOf, placeBeside, sideOf, type Box, type ListSide } from './layout.ts';
-import { Composer, Conversation, ConversationList, ICON, Notice, SEND_HINT, TARGETED_LABELS, changeState, describeCapture, describeThread, threadActions, useSubmission, type Review, type ThreadAction } from './conversation.tsx';
+import { Composer, Conversation, ConversationList, ICON, MentionClient, Notice, SEND_HINT, TARGETED_LABELS, changeState, describeCapture, describeThread, forMe, threadActions, useSubmission, type Review, type ThreadAction } from './conversation.tsx';
 import { Tip } from './tip.tsx';
 import type { Status } from './panel.tsx';
 
@@ -875,6 +875,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     if (!wide) setListOpen(false);
   };
   const openCount = threads.filter((t) => t.state === 'open').length;
+  const mineCount = threads.filter((t) => forMe(review, t)).length;
   const sharing = captureStatus.kind !== 'inactive';
   const captureNote = captureStatus.kind === 'inactive' && captureStatus.reason ? describeCapture(captureStatus) : captureStatus.kind === 'requesting' ? describeCapture(captureStatus) : null;
   const shownNote = note ?? (bubble?.kind === 'draft' ? null : capture?.invalidatedNotice ?? captureNote) ?? (status?.kind === 'error' ? status.text : null);
@@ -894,7 +895,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const targetTip = selecting ? 'Annuler le ciblage · Échap' : `Commenter un élément${shortcut ? ' · C' : ''}`;
 
   return (
-    <>
+    <MentionClient.Provider value={client}>
       <Tip doc={document} />
       <div ref={toolbarRef} data-socrate="toolbar" role="toolbar" aria-label="Socrate" aria-keyshortcuts="Alt+Shift+S" data-compact={room < 720 || undefined} data-narrow={room < 520 || undefined} style={{ left: center, maxWidth: room - 16, visibility: triage ? 'hidden' : undefined }}>
         <button type="button" data-socrate-action="target" data-capture={captureStatus.kind === 'inactive' ? `inactive:${captureStatus.reason ?? ''}` : captureStatus.kind} aria-pressed={selecting}
@@ -904,8 +905,8 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
         {selecting && <span data-hint>Cliquez un élément · Échap</span>}
         {draftHidden && <button type="button" data-socrate-action="draft" data-socrate-tip="Reprendre le brouillon non envoyé">Brouillon</button>}
         <span data-sep aria-hidden="true" />
-        <button type="button" data-socrate="launcher" data-socrate-action="launcher" aria-expanded={listOpen} aria-controls="socrate-frame" aria-label={`Conversations (${openCount} ouvertes)`} data-socrate-tip="Conversations">
-          {ICON.list}{openCount > 0 && <span data-count aria-hidden="true">{openCount}</span>}
+        <button type="button" data-socrate="launcher" data-socrate-action="launcher" aria-expanded={listOpen} aria-controls="socrate-frame" aria-label={`Conversations (${openCount} ouvertes${mineCount ? `, ${mineCount} pour vous` : ''})`} data-socrate-tip={mineCount ? `Conversations · ${mineCount} pour vous` : 'Conversations'}>
+          {ICON.list}{openCount > 0 && <span data-count data-mine={mineCount > 0 || undefined} aria-hidden="true">{openCount}</span>}
         </button>
         <button type="button" data-socrate-action="more" aria-expanded={moreOpen} aria-haspopup="menu" aria-label="Plus d’options" data-socrate-tip="Plus d’options">{ICON.more}</button>
         <span data-sep aria-hidden="true" />
@@ -1005,7 +1006,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
         </Boundary>,
         bubbleDoc,
       )}
-    </>
+    </MentionClient.Provider>
   );
 }
 

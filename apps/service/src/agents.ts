@@ -1,4 +1,4 @@
-import { USER_CODE_ALPHABET, USER_CODE_PATTERN, formatUserCode, normalizeUserCode, type AgentGrant, type AgentToken, type Capability, type DeviceDetails, type DeviceStart } from '@socrate/contract';
+import { USER_CODE_ALPHABET, USER_CODE_PATTERN, formatUserCode, normalizeUserCode, type AgentGrant, type AgentToken, type Capability, type DeviceDetails, type DeviceStart, type Actor } from '@socrate/contract';
 import type { Env } from './env.ts';
 import { readConfig } from './env.ts';
 import { HttpError, nowIso } from './http.ts';
@@ -199,6 +199,14 @@ export async function refreshAgent(env: Env, principal: Principal, projectId: st
     .bind(JSON.stringify(capabilities), tokenId, projectId, p.actor.key, nowSec()).run();
   if ((r.meta.changes ?? 0) === 0) throw new HttpError(404, 'not_found', 'agent inconnu');
   return { tokenId, capabilities };
+}
+
+/** Personnes qui ont déjà écrit sur le projet, pour les mentionner : aucun annuaire de l'hôte, et personne qui aurait seulement ouvert le panneau. */
+export async function listPeople(env: Env, principal: Principal, projectId: string): Promise<Actor[]> {
+  const p = reviewer(principal, projectId);
+  if (!p.capabilities.includes('thread.participate')) throw new HttpError(403, 'forbidden', 'capacité thread.participate absente');
+  const rows = (await env.DB.prepare('SELECT author_key, author_name, MAX(created_at) AS seen FROM messages WHERE project_id = ? GROUP BY author_key ORDER BY seen DESC LIMIT 200').bind(projectId).all<{ author_key: string; author_name: string }>()).results;
+  return rows.map((r) => ({ key: r.author_key, displayName: r.author_name }));
 }
 
 /** Révocation par l'acteur dans le panneau : seulement ses propres jetons ; une seconde révocation rend le même résultat. */

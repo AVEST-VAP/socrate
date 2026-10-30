@@ -3377,6 +3377,46 @@ test('consigne @agent : étiquette, filtre « Pour mon agent » de la vue de tra
   } finally { await ctx.context.close(); }
 });
 
+test('mention : suggestions au clavier depuis les auteurs du projet, « Pour moi » pour la personne citée, levé par sa réponse', async () => {
+  const claire = await browser.newContext(origins());
+  const karim = await browser.newContext(origins());
+  try {
+    const a = await loginAs(claire, 'Claire Morel, relectrice produit');
+    await toolbarReady(a);
+    await control(a, 'launcher').click();
+    const body = 'Mention : le bouton est-il prioritaire ?';
+    await list(a).getByRole('textbox', { name: 'Votre commentaire global' }).fill(body);
+    await list(a).getByRole('button', { name: 'Envoyer' }).click();
+    await list(a).getByTestId('socrate-row').filter({ hasText: body }).waitFor();
+
+    const k = await loginAs(karim, 'Karim Benali, développeur');
+    await toolbarReady(k);
+    await control(k, 'launcher').click();
+    const rowK = list(k).getByTestId('socrate-row').filter({ hasText: body });
+    await rowK.locator('.socrate-row').click();
+    const reply = rowK.getByRole('textbox', { name: /^Répondre au retour/ });
+    await reply.pressSequentially('@cla');
+    await rowK.getByTestId('socrate-mentions').getByRole('option', { name: 'Claire Morel' }).waitFor();
+    await reply.press('Enter');
+    assert.match(await reply.inputValue(), /^@Claire Morel $/, 'Entrée choisit la suggestion sans envoyer');
+    await reply.pressSequentially('c’est P1 ?');
+    await reply.press('Enter');
+    await rowK.getByText('c’est P1 ?').first().waitFor();
+
+    await a.reload();
+    await toolbarReady(a);
+    await control(a, 'launcher').click();
+    const rowA = list(a).getByTestId('socrate-row').filter({ hasText: body });
+    await rowA.getByTestId('socrate-for-me').waitFor();
+    assert.match((await control(a, 'launcher').getAttribute('aria-label'))!, /1 pour vous/);
+    await rowA.locator('.socrate-row').click();
+    await rowA.getByRole('textbox', { name: /^Répondre au retour/ }).fill('Oui, P1.');
+    await rowA.getByRole('button', { name: 'Envoyer' }).click();
+    await rowA.getByText('Oui, P1.').first().waitFor();
+    await rowA.getByTestId('socrate-for-me').waitFor({ state: 'detached' });
+  } finally { await claire.context.close(); await karim.context.close(); }
+});
+
 test('résolution par un agent avec commit : en attente sans déploiement postérieur, rien d’affirmé après un build sous un autre commit, en ligne depuis le déploiement qui porte le commit, rien face à un ancien service ; commit au survol, aucun identifiant de déploiement', async () => {
   const ctx = await browser.newContext(origins());
   try {
