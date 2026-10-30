@@ -3305,6 +3305,46 @@ test('position probable refusée : sélection, cible vide dans un parent texté,
   } finally { await ctx.context.close(); }
 });
 
+test('liste ancrée à gauche : page et poignée inversées, pastilles et bulle à droite de la liste, bord conservé, et cliquable sous une modale qui bloque le body', async () => {
+  const ctx = await browser.newContext(origins());
+  const page = await loginAs(ctx, 'Claire Morel, relectrice produit');
+  try {
+    await openRdv(page);
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    const frame = page.locator('#socrate-frame');
+    await frame.waitFor();
+    await control(page, 'more').click();
+    await control(page, 'side').click();
+    const box = async () => (await frame.boundingBox())!;
+    assert.equal((await box()).x, 0, 'liste au bord gauche');
+    const handle = page.getByRole('separator', { name: 'Largeur des conversations' });
+    const width = (await box()).width;
+    await handle.focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal((await box()).width, width + 16, 'flèche droite : la liste s’élargit depuis la gauche');
+    const h = (await handle.boundingBox())!;
+    await page.mouse.move(h.x + 4, h.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(h.x + 44, h.y + 200, { steps: 6 });
+    await page.mouse.up();
+    assert.equal((await box()).width, width + 56, 'glissé vers la droite : la liste s’élargit');
+    const tb = (await toolbar(page).boundingBox())!;
+    assert.ok(tb.x >= (await box()).width, `toolbar à droite de la liste ${JSON.stringify(tb)}`);
+    await page.reload();
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    await frame.waitFor();
+    assert.equal((await box()).x, 0, 'bord retrouvé après rechargement');
+    await page.evaluate(() => { document.body.style.pointerEvents = 'none'; });
+    await list(page).getByRole('textbox', { name: 'Votre commentaire global' }).click({ timeout: 3000 });
+    await page.evaluate(() => { document.body.style.pointerEvents = ''; });
+    await control(page, 'more').click();
+    await control(page, 'side').click();
+    assert.equal((await box()).x + (await box()).width, 1280, 'retour au bord droit');
+  } finally { await ctx.context.close(); }
+});
+
 test('résolution par un agent avec commit : en attente sans déploiement postérieur, rien d’affirmé après un build sous un autre commit, en ligne depuis le déploiement qui porte le commit, rien face à un ancien service ; commit au survol, aucun identifiant de déploiement', async () => {
   const ctx = await browser.newContext(origins());
   try {
@@ -3344,6 +3384,7 @@ test('résolution par un agent avec commit : en attente sans déploiement posté
       return { text: await t.innerText(), title: await t.getAttribute('title'), conversation: await row(page, id).getByTestId('socrate-conversation').innerText() };
     };
     const waiting = await transition();
+    assert.match(waiting.conversation, /Claude\s*via Karim Benali/, 'l’agent écrit, la personne répond de lui');
     assert.deepEqual([waiting.text, waiting.title], ['Corrigé par Claude · en attente de la prochaine preview', 'Commit 0a1b2c3']);
     assert.doesNotMatch(waiting.conversation, /déploiement|local-1/);
     await shot(page, 'resolution-en-attente');

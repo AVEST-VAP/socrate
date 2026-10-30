@@ -138,7 +138,7 @@ npx @meyer0x/socrate threads --json
 npx @meyer0x/socrate resolve <id> --message "Shortened the label."
 ```
 
-`thread <id> --captures .socrate` downloads the target and the screenshot of a thread, and `reply <id> "<message>"` answers it. Messages show "Your Name · via Claude"; resolutions read « Corrigé par Claude », with the commit on hover. Details: [For coding agents](packages/socrate/README.md#for-coding-agents).
+`thread <id> --captures .socrate` downloads the target and the screenshot of a thread, and `reply <id> "<message>"` answers it. Messages show "Claude via Your Name"; resolutions read « Corrigé par Claude », with the commit on hover. Details: [For coding agents](packages/socrate/README.md#for-coding-agents).
 
 - Read feedback without a person, with a `review.read` token: [docs/agent-api.md](docs/agent-api.md). The examples in that file are executed verbatim by the test suite.
 - Prepare a review: the `.socrate/` manifest section of [docs/integrate.md](docs/integrate.md).

@@ -110,6 +110,7 @@ Refusals: a replayed assertion gets `401 assertion_replayed`; a malformed one `4
 The client takes three inputs:
 
 - `preview`: `{ serviceUrl, projectId, reviewKey, deploymentId }`, injected at build time or served by your backend;
+- `agentLogos` (optional): logo address by lowercase agent name, for example `{ claude: '/logos/claude.svg' }`. Without an entry, messages from that agent show a neutral monogram. Socrate ships no third-party logo.
 - `getIdentityAssertion(signal)`: calls your route from step 1 and returns the JWT string; `signal` is aborted when the client unmounts;
 - `navigation`: `{ current(): string, go(route: string): void }`, wired to your router. Socrate uses it to know which screen a comment belongs to and to open the page of a thread.
 

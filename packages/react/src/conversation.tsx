@@ -112,6 +112,19 @@ export type Review = {
   refresh: () => Promise<void>;
   canModerate: boolean;
   canParticipate: boolean;
+  agentLogos?: AgentLogos;
+};
+
+/** Logos d'agents fournis par l'hôte, par nom en minuscules : le nom est déclaré au login, un logo n'atteste rien. */
+export type AgentLogos = Readonly<Record<string, string>>;
+const logoOf = (via: string, logos?: AgentLogos) => { const k = via.trim().toLowerCase(); return logos && Object.hasOwn(logos, k) ? logos[k] : undefined; };
+
+/** L'agent écrit, la personne répond de lui : logo fourni par l'hôte, sinon monogramme neutre. */
+const AgentAvatar = ({ via, logos }: { via: string; logos: AgentLogos | undefined }) => {
+  const logo = logoOf(via, logos);
+  return logo
+    ? <img className="socrate-avatar" src={logo} alt="" width={24} height={24} data-testid="socrate-agent-logo" />
+    : <span className="socrate-avatar" style={{ width: 24, height: 24, background: '#52525b' }} aria-hidden="true">{initialsOf(via)}</span>;
 };
 
 export const Avatar = ({ actor, size = 24 }: { actor: Actor; size?: 24 | 28 }) => (
@@ -223,13 +236,13 @@ export function Transition({ m }: { m: Message }) {
   );
 }
 
-function MessageView({ m, client }: { m: Message; client: ReviewClient }) {
+function MessageView({ m, client, logos }: { m: Message; client: ReviewClient; logos: AgentLogos | undefined }) {
   return (
     <div className="socrate-msg" data-testid="socrate-message">
-      <Avatar actor={m.author} />
+      {m.via ? <AgentAvatar via={m.via} logos={logos} /> : <Avatar actor={m.author} />}
       <div>
-        <strong title={m.exploring ? `Compte exploré : ${m.exploring.account}` : undefined}>{m.author.displayName}</strong>
-        {m.via && <span className="socrate-meta" data-testid="socrate-via">· via {m.via} </span>}
+        <strong title={m.exploring ? `Compte exploré : ${m.exploring.account}` : undefined}>{m.via ?? m.author.displayName}</strong>
+        {m.via && <span className="socrate-meta" data-testid="socrate-via">via {m.author.displayName} </span>}
         <When iso={m.createdAt} />
         {m.transition && <p className="socrate-meta"><Transition m={m} /></p>}
         <p>{m.body}</p>
@@ -293,7 +306,7 @@ export function Conversation({ thread, review, onClose, inputRef }: { thread: Th
       </div>
       <Notice view={quiet(transition.view)} submission={transition.submission} testId="socrate-pending-state" />
       {thread.proposal && <Suspense fallback={null}><ProposalView proposal={thread.proposal} /></Suspense>}
-      <div className="socrate-messages">{thread.messages.map((m) => <MessageView key={m.messageId} m={m} client={client} />)}</div>
+      <div className="socrate-messages">{thread.messages.map((m) => <MessageView key={m.messageId} m={m} client={client} logos={review.agentLogos} />)}</div>
       <Notice view={quiet(reply.view)} submission={reply.submission} testId="socrate-pending-reply" />
       <Composer me={session?.actor ?? null} label={`Répondre au retour de ${thread.author.displayName}`} placeholder="Répondre" inputRef={inputRef}
         value={reply.view.draft.text} onChange={(t) => reply.submission.edit(t)} busy={replyBusy} disabled={session !== null && !canParticipate}

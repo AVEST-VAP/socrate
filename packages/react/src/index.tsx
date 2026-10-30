@@ -2,12 +2,14 @@ import { Component, Suspense, lazy, useEffect, useRef, type ReactNode } from 're
 import type { PreviewContext } from './client.ts';
 import type { NavigationAdapter } from './panel.tsx';
 import type { Actions } from './frame.tsx';
+import type { AgentLogos } from './conversation.tsx';
 
 export type { PreviewContext, NavigationAdapter };
 
 /**
  * L'hôte remonte le composant avec une `key` liée à l'identité (acteur réel et compte
  * exploré) lorsqu'elle change dans le même onglet : brouillons, envois en attente et session repartent de zéro.
+ * `agentLogos` associe un nom d'agent en minuscules à l'adresse de son logo ; sans entrée, un monogramme neutre.
  * `editorial` réactive explicitement le panneau historique (avant/maintenant, zones, demandes d'avis, repères, revue des textes) ; faux par défaut.
  */
 export type SocrateReviewProps = {
@@ -15,6 +17,7 @@ export type SocrateReviewProps = {
   getIdentityAssertion: (signal: AbortSignal) => Promise<string>;
   navigation: NavigationAdapter;
   editorial?: boolean;
+  agentLogos?: AgentLogos;
 };
 
 const FAILED = { position: 'fixed', right: 16, bottom: 68, zIndex: 2147483001, margin: 0, font: '14px system-ui, sans-serif', padding: '8px 12px', borderRadius: 6, background: '#fdecec', color: '#8a1c1c' } as const;

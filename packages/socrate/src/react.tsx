@@ -10,6 +10,7 @@ export type SocrateReviewProps = {
   getIdentityAssertion: (signal: AbortSignal) => Promise<string>;
   navigation: NavigationAdapter;
   editorial?: boolean;
+  agentLogos?: Readonly<Record<string, string>>;
 };
 
 // Une page encadrée ou servie depuis une autre origine que celle du build n'obtiendrait aucune session : rien n'est rendu.

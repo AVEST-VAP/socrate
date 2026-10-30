@@ -199,7 +199,7 @@ function describeTransition(m: Message): string {
 }
 
 function describeMessage(m: Message): string {
-  const who = `${m.author.displayName}${m.via ? ` · via ${m.via}` : ''}`;
+  const who = m.via ? `${m.via} via ${m.author.displayName}` : m.author.displayName;
   return `${who}${m.transition ? ` · ${describeTransition(m)}` : ''} · ${short(m.createdAt)}`;
 }
 
