@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AUTHOR_COLORS, cluster, colorOf, initialsOf, place, relativeDate } from '../../../packages/react/src/layout.ts';
+import { AUTHOR_COLORS, cluster, colorOf, hull, initialsOf, place, relativeDate } from '../../../packages/react/src/layout.ts';
 import { isGenericLabel, openContainerHint } from '../../../packages/react/src/container.ts';
 import type { Target } from '@socrate/contract';
 
@@ -35,6 +35,62 @@ test('libellé de conteneur : un nom de composant n’est pas un nom, sans casse
   assert.equal(hint({ label: 'Dialog' }), 'C’était dans une fenêtre ou un panneau. Ouvrez-le pour retrouver l’élément.', 'ancien fil');
   assert.equal(hint({ label: 'Modifier le client' }), 'C’était dans la fenêtre « Modifier le client ». Ouvrez-la pour retrouver l’élément.');
   assert.equal(hint(undefined), null);
+});
+
+const overlap = (p: { x: number; y: number }, a: { x: number; y: number; width: number; height: number }) =>
+  Math.max(0, Math.min(p.x + size.width, a.x + a.width) - Math.max(p.x, a.x)) * Math.max(0, Math.min(p.y + size.height, a.y + a.height) - Math.max(p.y, a.y));
+const onScreen = (p: { x: number; y: number }, v = view) => p.x >= 8 && p.x + size.width <= v.width - 8 && p.y >= 8 && p.y + size.height <= v.height - 72;
+
+test('cible avec point : le côté libre le plus proche du geste, aligné sur lui, sans recouvrir la cible', () => {
+  const bloc = { x: 24, y: 77, width: 1232, height: 352 };
+  assert.deepEqual(place(bloc, size, view, { x: 30, y: 250 }), { x: 10, y: 437, sheet: false }, 'grand bloc : dessous, à gauche du clic');
+  const bas = { x: 24, y: 300, width: 1232, height: 300 };
+  assert.deepEqual(place(bas, size, view, { x: 900, y: 400 }), { x: 880, y: 172, sheet: false }, 'pas de place dessous : dessus');
+  const bouton = { x: 500, y: 200, width: 120, height: 32 };
+  assert.deepEqual(place(bouton, size, view, { x: 508, y: 216 }), { x: 152, y: 196, sheet: false }, 'petite cible, clic à gauche : à gauche');
+  assert.deepEqual(place(bouton, size, view, { x: 616, y: 216 }), { x: 628, y: 196, sheet: false }, 'petite cible, clic à droite : à droite');
+  assert.deepEqual(place({ x: 40, y: 40, width: 200, height: 560 }, size, view, { x: 100, y: 300 }), { x: 248, y: 280, sheet: false }, 'colonne haute : à droite, à hauteur du clic');
+});
+
+test('cible en bord d’écran : côté libre opposé, bulle bornée, bande de la toolbar exclue', () => {
+  const droite = { x: 1180, y: 300, width: 100, height: 40 };
+  assert.deepEqual(place(droite, size, view, { x: 1200, y: 320 }), { x: 832, y: 300, sheet: false }, 'bord droit : à gauche');
+  const bas = { x: 500, y: 620, width: 120, height: 28 };
+  assert.deepEqual(place(bas, size, view, { x: 510, y: 634 }), { x: 152, y: 528, sheet: false }, 'bas de la zone utile : à gauche, au-dessus de la toolbar');
+  const haut = { x: 500, y: 0, width: 120, height: 30 };
+  assert.deepEqual(place(haut, size, view, { x: 510, y: 15 }), { x: 152, y: 8, sheet: false }, 'bord haut : à gauche, bornée en haut');
+  const liste = { width: 900, height: 720 };
+  const sousLaListe = place({ x: 700, y: 100, width: 500, height: 80 }, size, liste, { x: 880, y: 140 });
+  assert.equal(sousLaListe.y, 188, 'élément coupé par la liste : dessous');
+  assert.ok(sousLaListe.x + size.width <= 892, JSON.stringify(sousLaListe));
+});
+
+test('place insuffisante : le moins de recouvrement, bulle entière à l’écran et hors de la toolbar', () => {
+  const large = { x: 140, y: 24, width: 1000, height: 600 };
+  const p = place(large, size, view, { x: 600, y: 300 });
+  assert.deepEqual(p, { x: 8, y: 528, sheet: false }, 'coin bas, côté le plus proche du clic');
+  assert.ok(onScreen(p));
+  assert.ok(overlap(p, large) < overlap({ x: 580, y: 312 }, large), 'moins couvert que sous le point');
+
+  const page = { x: 0, y: -500, width: 1280, height: 3000 };
+  assert.deepEqual(place(page, size, view, { x: 640, y: 300 }), { x: 620, y: 312, sheet: false }, 'élément plus grand que la fenêtre : sous le point du clic');
+  const sansPoint = place(page, size, view);
+  assert.ok(onScreen(sansPoint), JSON.stringify(sansPoint));
+
+  for (const a of [{ x: 8, y: 8, width: 1264, height: 640 }, { x: 900, y: 0, width: 380, height: 648 }, { x: 0, y: 0, width: 380, height: 648 }, { x: -200, y: -200, width: 900, height: 2000 }]) {
+    for (const near of [undefined, { x: Math.max(0, a.x) + 10, y: 300 }]) {
+      const q = place(a, size, view, near);
+      assert.ok(onScreen(q), JSON.stringify({ a, q }));
+    }
+  }
+  assert.equal(overlap(place({ x: 900, y: 0, width: 380, height: 648 }, size, view, { x: 1000, y: 300 }), { x: 900, y: 0, width: 380, height: 648 }), 0, 'colonne droite pleine hauteur : à sa gauche');
+});
+
+test('fil : pastille et élément ne font qu’une cible ; feuille inchangée sous 520 px', () => {
+  assert.deepEqual(hull({ x: 100, y: 100, width: 200, height: 40 }, { x: 294, y: 78, width: 28, height: 28 }), { x: 100, y: 78, width: 222, height: 62 });
+  const a = hull({ x: 100, y: 100, width: 200, height: 40 }, { x: 294, y: 78, width: 28, height: 28 });
+  assert.deepEqual(place(a, size, view, { x: 308, y: 92 }), { x: 330, y: 72, sheet: false }, 'à droite de la pastille');
+  assert.deepEqual(place({ x: 10, y: 10, width: 300, height: 400 }, size, { width: 375, height: 700 }, { x: 40, y: 40 }), { x: 8, y: 508, sheet: true });
 });
 
 test('regroupement à 20 px du premier point, ordre conservé', () => {

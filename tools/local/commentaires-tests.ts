@@ -311,6 +311,7 @@ test('correction par sélection : clic droit, texte actuel et remplacement disti
   await toolbarReady(page);
 
   const at = await selectText(page, 'article p:nth-of-type(1)', 'Mme Fictive Durand');
+  const selection = await page.evaluate(() => { const { x, y, width, height } = getSelection()!.getRangeAt(0).getBoundingClientRect(); return { x, y, width, height }; });
   await page.mouse.click(at.x, at.y, { button: 'right' });
   const menu = page.locator('[data-socrate="menu"]');
   await menu.getByRole('menuitem', { name: 'Proposer une correction' }).waitFor();
@@ -319,6 +320,8 @@ test('correction par sélection : clic droit, texte actuel et remplacement disti
   const draft = bubble(page).getByTestId('socrate-draft');
   await draft.waitFor({ timeout: 10_000 });
   assert.equal(await draft.getAttribute('data-mode'), 'correction');
+  const recouvre = near((await bubbleBox(page))!, selection);
+  assert.ok(recouvre > 0 && recouvre <= 16, `bulle contre la sélection sans la recouvrir (${recouvre} px)`);
   assert.match(await bubble(page).getByTestId('socrate-original').innerText(), /Texte actuel\s+« Mme Fictive Durand »/);
   const field = bubble(page).getByRole('textbox', { name: 'Correction proposée' });
   assert.equal(await field.inputValue(), 'Mme Fictive Durand', 'remplacement prérempli avec la sélection');
@@ -1533,7 +1536,8 @@ test('géométrie : toolbar centrée à ±2 px de la place utile, 48 px, liste o
   const all = JSON.stringify(facts.geometrie);
   assert.ok(fermee.ecart <= 2 && ouverte.ecart <= 2, `toolbar centrée ${all}`);
   assert.equal(fermee.hauteur, 48, 'pilule de 48 px');
-  assert.ok(Math.abs(pop.x - clic.x) <= 24 && pop.y - clic.y >= 0 && pop.y - clic.y <= 24, `coin du popover à moins de 24 px du clic sur un bloc pleine largeur ${all}`);
+  const posee = pop.y >= pb.y + pb.height || pop.y + pop.height <= pb.y;
+  assert.ok(Math.abs(pop.x - clic.x) <= 24 && posee && near(pop, pb) <= 16, `popover à 24 px du clic en largeur, contre le bloc pleine largeur sans le recouvrir ${all}`);
   assert.ok(pop.y + pop.height <= bar.y, `popover au-dessus de la toolbar ${all}`);
   for (const w of [375, 320]) {
     const e = etroit[w] as { scroll: number; gauche: number; droite: number; ecart: number };

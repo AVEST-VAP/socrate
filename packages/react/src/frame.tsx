@@ -6,7 +6,7 @@ import type { CaptureStatus, TabCapture } from './capture.ts';
 import { HOST_CSS, PANEL_CSS } from './styles.ts';
 import type { SocrateReviewProps } from './index.tsx';
 import { admissibleRange, afterNavigation, aimsAtSelection, cleanText, currentSelection, findTarget, inContext, isEditable, isSocrate, nearbyText, offsetOf, rectOf, roleOf, sameOriginFrames, sameOriginRoute, screenOf, type Spot } from './locate.ts';
-import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, initialsOf, listBounds, listWidthOf, place, type Box } from './layout.ts';
+import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, hull, initialsOf, listBounds, listWidthOf, place, type Box } from './layout.ts';
 import { Composer, Conversation, ConversationList, ICON, Notice, SEND_HINT, TARGETED_LABELS, changeState, describeCapture, describeThread, threadActions, useSubmission, type Review, type ThreadAction } from './conversation.tsx';
 import { Tip } from './tip.tsx';
 import type { Status } from './panel.tsx';
@@ -422,17 +422,18 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
 
   // Écran étroit : la liste couvre la page, la bulle devient une feuille.
   const viewport = { width: innerWidth - (wide ? listWidth : 0), height: innerHeight };
-  const anchorOf = (b: Bubble): Box => {
+  /** Ce que la bulle ne recouvre pas, et le point dont elle reste proche : zone ou élément du brouillon et son geste, élément d'un fil et sa pastille. */
+  const anchorOf = (b: Bubble): { box: Box; near?: { x: number; y: number } } => {
     if (b.kind === 'draft' && shot) {
       const r = rectOf({ element: shot.element, frame: shot.frame });
-      return r ? { x: r.x + shot.point.x, y: r.y + shot.point.y, width: 0, height: 0 } : b.at;
+      if (!r) return { box: b.at };
+      return { box: shot.zone ? { ...shot.zone, x: r.x + shot.zone.x, y: r.y + shot.zone.y } : boxOf(r), near: { x: r.x + shot.point.x, y: r.y + shot.point.y } };
     }
-    if (b.kind === 'thread') {
-      const s = spots.get(b.threadId);
-      const r = s && rectOf(s);
-      return r ? { ...pinAt(r), width: 28, height: 28 } : b.at;
-    }
-    return b.at;
+    const s = b.kind === 'thread' ? spots.get(b.threadId) : b.kind === 'cluster' ? spots.get(b.threadIds[0]!) : null;
+    const r = s && rectOf(s);
+    if (!r) return { box: b.at };
+    const pin = { ...pinAt(r), width: 28, height: 28 };
+    return { box: hull(r, pin), near: { x: pin.x + 14, y: pin.y + 14 } };
   };
   const bubbleRef = useRef<HTMLIFrameElement>(null);
   const bubbleDoc = useFrameDoc(bubbleRef, 'Conversation Socrate');
@@ -440,7 +441,8 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const bubbleWidth = Math.min(340, viewport.width - 16);
   const thread = bubble?.kind === 'thread' ? threads.find((t) => t.threadId === bubble.threadId) ?? null : null;
   const showBubble = bubble !== null && (bubble.kind !== 'thread' || thread !== null);
-  const at = showBubble ? place(anchorOf(bubble!), { width: bubbleWidth, height: bubbleHeight }, viewport) : null;
+  const anchor = showBubble ? anchorOf(bubble!) : null;
+  const at = anchor ? place(anchor.box, { width: bubbleWidth, height: bubbleHeight }, viewport, anchor.near) : null;
 
   // Contrôle qui a ouvert le fil affiché (pastille, ligne de la liste) : il reprend le focus à la fermeture, sinon la toolbar.
   const opener = useRef<HTMLElement | null>(null);
