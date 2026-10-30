@@ -4,7 +4,7 @@
     "entreeDeltaGzip": 1024,
     "bootstrapGzip": 2048,
     "panneauGzip": 32512,
-    "arriveeOuvertureOctets": 131072,
+    "arriveeOuvertureOctets": 131584,
     "ouvertureOctetsServis": 8192,
     "guideGzip": 3072,
     "captureGzip": 5632,
