@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AUTHOR_COLORS, cluster, colorOf, hull, initialsOf, place, relativeDate } from '../../../packages/react/src/layout.ts';
+import { isGenericLabel, openContainerHint } from '../../../packages/react/src/container.ts';
+import type { Target } from '@socrate/contract';
 
 const view = { width: 1280, height: 720 };
 const size = { width: 340, height: 120 };
@@ -24,6 +26,15 @@ test('point du clic : coin à moins de 24 px dans les deux axes, retourné au-de
   assert.deepEqual(place({ x: 1270, y: 100, width: 0, height: 0 }, size, view).x, 932, 'bornée au bord droit');
   assert.deepEqual(place({ x: 890, y: 100, width: 0, height: 0 }, size, { width: 900, height: 720 }).x, 552, 'liste ouverte : bornée à la largeur utile');
   assert.deepEqual(place({ x: 4, y: 100, width: 0, height: 0 }, size, view).x, 8, 'bornée au bord gauche');
+});
+
+test('libellé de conteneur : un nom de composant n’est pas un nom, sans casse, accents ni ponctuation', () => {
+  for (const label of ['Dialog', 'dialog', 'MODAL', 'Modale', 'Drawer', 'Fenêtre', 'Boîte de dialogue', ' Pop-up ', 'Pop-in', 'Pop-over']) assert.equal(isGenericLabel(label), true, label);
+  for (const label of ['Modifier le client', 'Dialog client', 'Nouveau rendez-vous']) assert.equal(isGenericLabel(label), false, label);
+  const hint = (container: Target['container']) => openContainerHint({ container } as Target);
+  assert.equal(hint({ label: 'Dialog' }), 'C’était dans une fenêtre ou un panneau. Ouvrez-le pour retrouver l’élément.', 'ancien fil');
+  assert.equal(hint({ label: 'Modifier le client' }), 'C’était dans la fenêtre « Modifier le client ». Ouvrez-la pour retrouver l’élément.');
+  assert.equal(hint(undefined), null);
 });
 
 const overlap = (p: { x: number; y: number }, a: { x: number; y: number; width: number; height: number }) =>

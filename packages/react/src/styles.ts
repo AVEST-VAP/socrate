@@ -26,12 +26,10 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
 .socrate-status[data-kind="error"] { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
 .socrate-status[data-kind="success"] { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
 .socrate-shot { margin: 0 0 8px; }
-.socrate-shot img, .socrate-target img, .socrate-details img { max-width: 100%; border: 1px solid #e4e4e7; border-radius: 6px; }
-.socrate-target dl, .socrate-details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 4px 0; }
-.socrate-target dd, .socrate-details dd { margin: 0; overflow-wrap: anywhere; }
+.socrate-shot img, .socrate-target img { max-width: 100%; border: 1px solid #e4e4e7; border-radius: 6px; }
+.socrate-target dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 4px 0; }
+.socrate-target dd { margin: 0; overflow-wrap: anywhere; }
 pre.socrate-html { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; background: #f4f4f5; padding: 6px; border-radius: 6px; max-height: 120px; overflow: auto; }
-.socrate-details { border-top: 1px solid #e4e4e7; margin: 8px 0; padding-top: 8px; }
-.socrate-confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .socrate-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 button { font: inherit; color: inherit; }
 button.socrate-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid #18181b; border-radius: 8px; background: #18181b; color: #fff; font-size: 13px; font-weight: 500; cursor: pointer; }
@@ -114,19 +112,6 @@ li[data-state="resolved"] .socrate-row { opacity: .65; }
 .socrate-menu button:hover, .socrate-menu button:focus-visible { background: #f4f4f5; outline: none; }
 [data-socrate="tip"] { position: fixed; z-index: 3; max-width: 240px; padding: 4px 8px; border-radius: 6px; background: #18181b; color: #fafafa; font-size: 12px; line-height: 16px; pointer-events: auto; }
 @media (prefers-reduced-motion: no-preference) { .socrate-bubble { animation: socrate-in 120ms ease-out; transform-origin: top left; } @keyframes socrate-in { from { opacity: 0; transform: scale(.98); } } }
-.socrate-tray { padding: 2px 6px 4px; }
-.socrate-tray ul, .socrate-media { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
-.socrate-tray > p { margin: 6px 4px 0; }
-.socrate-chip { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 4px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; }
-.socrate-chip-preview { width: 32px; height: 32px; flex-shrink: 0; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: #f4f4f5; color: #71717a; }
-.socrate-chip-preview img, .socrate-chip-preview video { width: 100%; height: 100%; object-fit: cover; }
-.socrate-chip-text { min-width: 0; flex: 1; display: grid; }
-.socrate-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 500; }
-.socrate-media { margin-top: 8px; }
-.socrate-media-item { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
-.socrate-media-item img, .socrate-media-item video { display: block; width: 100%; max-height: 220px; object-fit: contain; border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; }
-.socrate-media-load { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 40px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; }
-.socrate-media-load:hover { background: #f4f4f5; }
 `;
 
 /** Éléments posés dans le document de l'hôte : uniquement sous `[data-socrate]`, aucun style de l'hôte n'est modifié. */

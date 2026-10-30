@@ -15,10 +15,12 @@ import type { Status } from './panel.tsx';
 const Panel = lazy(() => import('./panel.tsx').then((m) => ({ default: m.Panel })));
 // Connexion et révocation des agents : chargées à l'ouverture de « Connecter un agent ».
 const AgentsView = lazy(() => import('./agents.tsx').then((m) => ({ default: m.AgentsView })));
-// Capture recadrée d'une cible non retrouvée : chargée à « Voir où c’était ».
-const WhereView = lazy(() => import('./where.tsx').then((m) => ({ default: m.WhereView })));
+// Vue plein écran de traitement des retours : chargée à son ouverture.
+const TriageView = lazy(() => import('./triage.tsx').then((m) => ({ default: m.TriageView })));
 
 const LIST_STYLE = { position: 'fixed', top: 0, right: 0, maxWidth: '100vw', height: '100vh', border: 'none', borderLeft: '1px solid #e4e4e7', boxShadow: '-8px 0 24px -12px rgb(0 0 0 / .12)', zIndex: 2147483000, background: '#fff' } as const;
+/** Vue de traitement : la même iframe, portée à toute la fenêtre au-dessus de la toolbar et de la bulle. */
+const TRIAGE_STYLE = { width: '100vw', maxWidth: 'none', paddingBottom: 0, borderLeft: 'none', boxShadow: 'none', zIndex: 2147483003 } as const;
 const BUBBLE_STYLE = { position: 'fixed', border: '1px solid #e4e4e7', borderRadius: 12, boxShadow: '0 12px 32px -8px rgb(0 0 0 / .2), 0 2px 6px rgb(0 0 0 / .05)', zIndex: 2147483002, background: '#fff', colorScheme: 'light' } as const;
 /** Largeur choisie pour la liste, seule préférence gardée pour la session de l'onglet ; aucun texte de brouillon. */
 const WIDTH_KEY = 'socrate-largeur-liste';
@@ -108,8 +110,10 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   }, []);
 
   const [listOpen, setListOpen] = useState(false);
-  // La liste affiche les agents (`agents`), ou la capture d'un fil par son identifiant (« Voir où c’était »), à la place des conversations jusqu'au retour ou à sa fermeture.
-  const [aside, setAside] = useState<string | null>(null);
+  // La liste affiche les agents à la place des conversations jusqu'au retour ou à sa fermeture.
+  const [aside, setAside] = useState<'agents' | null>(null);
+  // Vue de traitement ouverte, sur un retour ou sur le début de la file ; la liste reste montée derrière, filtres et focus d'origine compris.
+  const [triage, setTriage] = useState<{ threadId: string | null } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [focusGeneral, setFocusGeneral] = useState(0);
   const [pref, setPref] = useState(storedWidth);
@@ -475,10 +479,9 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
 
   /**
    * « Voir sur la page » et « Aller à la page » : navigation explicite de l'hôte vers l'écran enregistré (route de l'hôte pour une iframe), même origine seulement, sauf s'il est déjà affiché.
-   * La cible est ensuite localisée par la même règle que les pastilles ; absente ou ambiguë, le fil reste lisible dans la liste, sans élément de remplacement.
-   * `retry` : Réessayer de « Voir où c’était », qui reste affiché si la cible n'est toujours pas retrouvée. Rend vrai si elle l'est.
+   * La cible est ensuite localisée par la même règle que les pastilles ; absente ou ambiguë, le fil reste lisible dans la liste, sans élément de remplacement. Rend vrai si elle est retrouvée.
    */
-  const goTo = async (threadId: string, retry = false) => {
+  const goTo = async (threadId: string) => {
     const t = threads.find((x) => x.threadId === threadId);
     const screen = t?.target ? screenOf(t.target) : null;
     if (!t || !screen || !sameOriginRoute(screen)) return false;
@@ -491,7 +494,6 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     }, 120);
     if (!alive.alive) return false;
     if (r.kind === 'missing') {
-      if (retry) return false;
       setListOpen(true);
       setExpanded(threadId);
       return false;
@@ -580,7 +582,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       return openPinMenu(pin, null);
     }
     // C seul, hors champ, composition, répétition et combinaison : copie, onglets et frappe de l'hôte restent intacts.
-    if (!shortcut || (e.key !== 'c' && e.key !== 'C') || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || isEditable(t)) return;
+    if (triage || !shortcut || (e.key !== 'c' && e.key !== 'C') || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || isEditable(t)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     void startTargeting();
@@ -829,20 +831,29 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   });
   const listRef = useRef<HTMLIFrameElement>(null);
   const listDoc = useFrameDoc(listRef, 'Revue Socrate');
-  const where = threads.find((t) => t.threadId === aside && t.target);
-  // Retour de « Voir où c’était » : le focus revient au bouton de la ligne d'origine, ou au titre de la liste si elle ne l'affiche plus.
-  const whereFrom = useRef<string | null>(null);
-  const backFromWhere = () => {
-    whereFrom.current = aside;
-    setAside(null);
+  // Fermeture de la vue de traitement : le focus revient au contrôle qui l'a ouverte, ou au titre de la liste si sa ligne n'est plus affichée.
+  const triageFrom = useRef<HTMLElement | null>(null);
+  const openTriage = (threadId: string | null) => {
+    if (showBubble) dismiss.current(false);
+    captureRef.current?.cancelSelection();
+    setMenu(null);
+    setMoreOpen(false);
+    triageFrom.current = listDoc?.ownerDocument.activeElement as HTMLElement | null;
+    setTriage({ threadId });
   };
   useEffect(() => {
-    const id = whereFrom.current;
-    if (aside !== null || id === null) return;
-    whereFrom.current = null;
-    const row = listDoc?.ownerDocument.querySelector<HTMLElement>(`[data-testid="socrate-row"][data-thread="${CSS.escape(id)}"] [data-testid="socrate-missing"]`);
-    (row ?? headingRef.current)?.focus();
-  }, [aside]);
+    const from = triageFrom.current;
+    if (triage || !from) return;
+    triageFrom.current = null;
+    (from.isConnected && from !== from.ownerDocument.body ? from : headingRef.current)?.focus();
+  }, [triage]);
+  /** « Voir dans la preview » : la vue se ferme, puis comme « Aller à la page » ; cible absente, consigne d'ouvrir son conteneur, l'écran étroit rendant la page visible. */
+  const showInPreview = async (threadId: string, hint: string) => {
+    setTriage(null);
+    if (await goTo(threadId)) return;
+    setNote(hint);
+    if (!wide) setListOpen(false);
+  };
   const openCount = threads.filter((t) => t.state === 'open').length;
   const sharing = captureStatus.kind !== 'inactive';
   const captureNote = captureStatus.kind === 'inactive' && captureStatus.reason ? describeCapture(captureStatus) : captureStatus.kind === 'requesting' ? describeCapture(captureStatus) : null;
@@ -865,7 +876,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   return (
     <>
       <Tip doc={document} />
-      <div ref={toolbarRef} data-socrate="toolbar" role="toolbar" aria-label="Socrate" aria-keyshortcuts="Alt+Shift+S" data-compact={room < 720 || undefined} data-narrow={room < 520 || undefined} style={{ left: center, maxWidth: room - 16 }}>
+      <div ref={toolbarRef} data-socrate="toolbar" role="toolbar" aria-label="Socrate" aria-keyshortcuts="Alt+Shift+S" data-compact={room < 720 || undefined} data-narrow={room < 520 || undefined} style={{ left: center, maxWidth: room - 16, visibility: triage ? 'hidden' : undefined }}>
         <button type="button" data-socrate-action="target" data-capture={captureStatus.kind === 'inactive' ? `inactive:${captureStatus.reason ?? ''}` : captureStatus.kind} aria-pressed={selecting}
           aria-label={selecting ? 'Annuler le ciblage' : 'Commenter un élément'} aria-keyshortcuts={shortcut ? 'C' : undefined} data-socrate-tip={targetTip}>
           {ICON.comment}<span data-label>Commenter</span>
@@ -922,25 +933,28 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
           </button>
         );
       })}
-      {listOpen && wide && (
+      {listOpen && wide && !triage && (
         <div data-socrate="resize" data-socrate-action="resize" role="separator" aria-orientation="vertical" aria-label="Largeur des conversations" aria-controls="socrate-frame"
           aria-valuenow={paneWidth} aria-valuemin={bounds.min} aria-valuemax={bounds.max} tabIndex={0} data-active={resizing || undefined}
           data-socrate-tip="Glisser ou flèches gauche et droite pour régler la largeur" style={{ right: paneWidth - 5 }} onKeyDown={onResizeKey} />
       )}
       {/* Liste couvrant la page : la bande de la toolbar reste sous le panneau, hors de son composeur. */}
-      <iframe ref={listRef} id="socrate-frame" title="Revue Socrate" src="about:blank" style={{ ...LIST_STYLE, ...(!wide && { boxSizing: 'border-box', paddingBottom: 64 }), width: paneWidth, display: listOpen ? undefined : 'none', pointerEvents: resizing ? 'none' : undefined }} data-socrate="panel" />
+      <iframe ref={listRef} id="socrate-frame" title="Revue Socrate" src="about:blank" style={{ ...LIST_STYLE, ...(!wide && { boxSizing: 'border-box', paddingBottom: 64 }), width: paneWidth, display: listOpen ? undefined : 'none', pointerEvents: resizing ? 'none' : undefined, ...(triage && TRIAGE_STYLE) }} data-socrate="panel" />
       <iframe ref={bubbleRef} id="socrate-bubble" title="Conversation Socrate" src="about:blank" data-socrate="bubble"
         style={{ ...BUBBLE_STYLE, display: showBubble ? undefined : 'none', left: at?.x ?? 0, top: at?.y ?? 0, width: at?.sheet ? viewport.width - 16 : bubbleWidth, height: bubbleHeight, pointerEvents: resizing ? 'none' : undefined }} />
       {listDoc && createPortal(
         <Boundary>
           {!editorial && <Tip doc={listDoc.ownerDocument} />}
-          {aside === 'agents' || where
-            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}>{where
-              ? <WhereView key={aside} thread={where} client={client} sameDeployment={where.deploymentId === preview.deploymentId} onBack={backFromWhere} onClose={closeList} onRetry={() => goTo(aside!, true)} headingRef={headingRef} />
-              : <AgentsView client={client} onBack={() => setAside(null)} onClose={closeList} headingRef={headingRef} />}</Suspense>
+          {aside === 'agents'
+            ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><AgentsView client={client} onBack={() => setAside(null)} onClose={closeList} headingRef={headingRef} /></Suspense>
             : editorial
             ? <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><Panel client={client} capture={capture} navigation={navigation} visible={listOpen} onClose={closeList} revision={revision} threads={threads} status={status} refresh={refresh} /></Suspense>
-            : <ConversationList review={review} title={revision?.manifest.title ?? null} status={status} route={route} located={located} expanded={expanded} onOpen={openThread} onGoto={(id) => void goTo(id)} onWhere={setAside} onClose={closeList} headingRef={headingRef} generalRef={generalRef} />}
+            : <>
+              {triage && <Suspense fallback={<p className="socrate-meta">Chargement…</p>}><TriageView review={review} start={triage.threadId} status={status} shortcut={shortcut} onClose={() => setTriage(null)} onShow={(id, hint) => void showInPreview(id, hint)} /></Suspense>}
+              <div style={{ display: triage ? 'none' : 'contents' }}>
+                <ConversationList review={review} title={revision?.manifest.title ?? null} status={status} route={route} located={located} expanded={expanded} onOpen={openThread} onGoto={(id) => void goTo(id)} onTriage={openTriage} onClose={closeList} headingRef={headingRef} generalRef={generalRef} />
+              </div>
+            </>}
         </Boundary>,
         listDoc,
       )}
