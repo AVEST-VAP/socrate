@@ -1,4 +1,5 @@
 import { sha256Hex, type ImageMeta, type Target } from '@socrate/contract';
+import { isGenericLabel } from './container.ts';
 import { cleanText, contextOf, isSocrate, nearbyText, offsetOf, roleOf, sameOriginFrames, sanitizedExcerpt } from './locate.ts';
 
 export type CaptureStatus =
@@ -47,13 +48,14 @@ const isClickShield = (el: Element) => {
   const v = el.ownerDocument.defaultView!;
   return r.left <= 0 && r.top <= 0 && r.right >= v.innerWidth && r.bottom >= v.innerHeight;
 };
-/** Conteneur modal ou latéral de la cible ; son libellé : `aria-label`, `aria-labelledby` ou premier titre, texte normalisé tronqué à 80 unités UTF-16. */
+/** Conteneur modal ou latéral de la cible ; son libellé : `aria-labelledby`, `aria-label` ou premier titre, le premier qui n'est pas générique, texte normalisé tronqué à 80 unités UTF-16. */
 const MODAL = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
 function containerOf(el: Element): Target['container'] {
   const box = el.closest(MODAL);
   if (!box) return undefined;
   const named = box.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => box.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
-  const label = cleanText(box.getAttribute('aria-label') || named || box.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]')?.textContent || '').replace(/\p{C}/gu, '');
+  const heading = box.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]')?.textContent;
+  const label = [named, box.getAttribute('aria-label'), heading].map((s) => cleanText(s ?? '').replace(/\p{C}/gu, '')).find((s) => s && !isGenericLabel(s)) ?? '';
   if (!label || label.length <= 80) return label ? { label } : {};
   // Coupure par points de code, jamais au milieu d'une paire de substitution ; 80 unités UTF-16 au plus, comme le contrat.
   let cut = '';
