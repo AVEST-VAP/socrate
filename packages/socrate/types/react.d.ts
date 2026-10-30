@@ -11,6 +11,7 @@ export type SocrateReviewProps = {
   navigation: NavigationAdapter;
   /** Shows the editorial surfaces (zones, markers, grouped wording review). Off by default. */
   editorial?: boolean;
+  agentLogos?: Readonly<Record<string, string>>;
 };
 
 /** Review toolbar, pins and conversations. Renders nothing inside an iframe or on another origin than `preview.origin`. Remount it with a `key` when the signed-in user changes. */

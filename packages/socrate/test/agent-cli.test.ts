@@ -161,12 +161,12 @@ test('threads, thread, reply, resolve et reopen au nom du dev, avec via, commit 
 
   const detail = await cli(['thread', open, '--review', REVIEW, '--agent', 'Claude']);
   assert.equal(detail.code, 0, detail.stderr);
-  assert.match(detail.stdout, /\[2\] Karim Benali · via Claude · .*\n {4}Raccourci dans le commit suivant\./);
-  assert.match(detail.stdout, new RegExp(`\\[3\\] Karim Benali · via Claude · fixed in ${head.slice(0, 7)} · waiting for the next preview · \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC\\n`));
-  assert.match(detail.stdout, /\[4\] Karim Benali · via Claude · reopened/);
+  assert.match(detail.stdout, /\[2\] Claude via Karim Benali · .*\n {4}Raccourci dans le commit suivant\./);
+  assert.match(detail.stdout, new RegExp(`\\[3\\] Claude via Karim Benali · fixed in ${head.slice(0, 7)} · waiting for the next preview · \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC\\n`));
+  assert.match(detail.stdout, /\[4\] Claude via Karim Benali · reopened/);
   assert.equal((await importDemo(bench, 'local-2', { commit: head })).status, 201);
   const live = await cli(['thread', open, '--review', REVIEW, '--agent', 'Claude']);
-  assert.match(live.stdout, new RegExp(`\\[3\\] Karim Benali · via Claude · fixed in ${head.slice(0, 7)} · live since \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC · `), 'heures en UTC, sans redite de l’agent');
+  assert.match(live.stdout, new RegExp(`\\[3\\] Claude via Karim Benali · fixed in ${head.slice(0, 7)} · live since \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC · `), 'heures en UTC, sans redite de l’agent');
 
   for (const [args, pattern] of [
     [['resolve', open, '--review', REVIEW, '--agent', 'Claude'], /--message is required/],

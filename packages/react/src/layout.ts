@@ -101,3 +101,12 @@ export function listWidthOf(pref: number, view: number): number {
   const { min, max } = listBounds(view);
   return Math.round(Math.min(max, Math.max(min, pref)));
 }
+
+/** Bord auquel la liste est ancrée. */
+export type ListSide = 'left' | 'right';
+export const sideOf = (stored: string | null): ListSide => (stored === 'left' ? 'left' : 'right');
+/** `place` compte depuis le bord gauche de sa fenêtre : liste à gauche, la bulle se place dans la bande restante, décalée de `inset`. */
+export function placeBeside(inset: number, a: Box, size: { width: number; height: number }, view: { width: number; height: number }, near?: Point): { x: number; y: number; sheet: boolean } {
+  const p = place({ ...a, x: a.x - inset }, size, view, near && { x: near.x - inset, y: near.y });
+  return { ...p, x: p.x + inset };
+}

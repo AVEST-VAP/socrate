@@ -6,7 +6,7 @@ import type { CaptureStatus, TabCapture } from './capture.ts';
 import { HOST_CSS, PANEL_CSS } from './styles.ts';
 import type { SocrateReviewProps } from './index.tsx';
 import { admissibleRange, afterNavigation, aimsAtSelection, cleanText, currentSelection, findTarget, inContext, isEditable, isSocrate, nearbyText, offsetOf, rectOf, roleOf, sameOriginFrames, sameOriginRoute, screenOf, type Spot } from './locate.ts';
-import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, hull, initialsOf, listBounds, listWidthOf, place, type Box } from './layout.ts';
+import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, hull, initialsOf, listBounds, listWidthOf, placeBeside, sideOf, type Box, type ListSide } from './layout.ts';
 import { Composer, Conversation, ConversationList, ICON, Notice, SEND_HINT, TARGETED_LABELS, changeState, describeCapture, describeThread, threadActions, useSubmission, type Review, type ThreadAction } from './conversation.tsx';
 import { Tip } from './tip.tsx';
 import type { Status } from './panel.tsx';
@@ -18,13 +18,19 @@ const AgentsView = lazy(() => import('./agents.tsx').then((m) => ({ default: m.A
 // Vue plein écran de traitement des retours : chargée à son ouverture.
 const TriageView = lazy(() => import('./triage.tsx').then((m) => ({ default: m.TriageView })));
 
-const LIST_STYLE = { position: 'fixed', top: 0, right: 0, maxWidth: '100vw', height: '100vh', border: 'none', borderLeft: '1px solid #e4e4e7', boxShadow: '-8px 0 24px -12px rgb(0 0 0 / .12)', zIndex: 2147483000, background: '#fff' } as const;
+const LIST_STYLE = { position: 'fixed', top: 0, maxWidth: '100vw', height: '100vh', border: 'none', zIndex: 2147483000, background: '#fff' } as const;
+const LIST_SIDE = {
+  right: { right: 0, borderLeft: '1px solid #e4e4e7', boxShadow: '-8px 0 24px -12px rgb(0 0 0 / .12)' },
+  left: { left: 0, borderRight: '1px solid #e4e4e7', boxShadow: '8px 0 24px -12px rgb(0 0 0 / .12)' },
+} as const;
 /** Vue de traitement : la même iframe, portée à toute la fenêtre au-dessus de la toolbar et de la bulle. */
-const TRIAGE_STYLE = { width: '100vw', maxWidth: 'none', paddingBottom: 0, borderLeft: 'none', boxShadow: 'none', zIndex: 2147483003 } as const;
+const TRIAGE_STYLE = { width: '100vw', maxWidth: 'none', paddingBottom: 0, borderLeft: 'none', borderRight: 'none', boxShadow: 'none', zIndex: 2147483003 } as const;
 const BUBBLE_STYLE = { position: 'fixed', border: '1px solid #e4e4e7', borderRadius: 12, boxShadow: '0 12px 32px -8px rgb(0 0 0 / .2), 0 2px 6px rgb(0 0 0 / .05)', zIndex: 2147483002, background: '#fff', colorScheme: 'light' } as const;
-/** Largeur choisie pour la liste, seule préférence gardée pour la session de l'onglet ; aucun texte de brouillon. */
+/** Largeur et bord choisis pour la liste, seules préférences gardées pour la session de l'onglet ; aucun texte de brouillon. */
 const WIDTH_KEY = 'socrate-largeur-liste';
+const SIDE_KEY = 'socrate-cote-liste';
 const storedWidth = () => { try { return Number(sessionStorage.getItem(WIDTH_KEY)) || LIST_DEFAULT; } catch { return LIST_DEFAULT; } };
+const storedSide = (): ListSide => { try { return sideOf(sessionStorage.getItem(SIDE_KEY)); } catch { return 'right'; } };
 const HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' } as const;
 const INACTIVE: CaptureStatus = { kind: 'inactive', reason: null };
 const noSubscription = () => () => {};
@@ -93,7 +99,7 @@ function useFrameDoc(ref: RefObject<HTMLIFrameElement | null>, title: string): H
  * Racine de Socrate, montée à l'arrivée pour l'identité connectée : un client, une session et une liste de fils partagés par la toolbar, la liste, la bulle et les pastilles.
  * La toolbar reste affichée ; fermer la liste, un fil ou « Tout fermer » ne la masque pas.
  */
-export default function ReviewFrame({ preview, getIdentityAssertion, navigation, editorial = false, actions }: SocrateReviewProps & { actions: Actions }) {
+export default function ReviewFrame({ preview, getIdentityAssertion, navigation, editorial = false, agentLogos, actions }: SocrateReviewProps & { actions: Actions }) {
   const client = useMemo(() => new ReviewClient(preview, getIdentityAssertion), [preview, getIdentityAssertion]);
   useEffect(() => {
     client.attach();
@@ -117,6 +123,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const [moreOpen, setMoreOpen] = useState(false);
   const [focusGeneral, setFocusGeneral] = useState(0);
   const [pref, setPref] = useState(storedWidth);
+  const [side, setSide] = useState(storedSide);
   const [resizing, setResizing] = useState(false);
   const [pinsHidden, setPinsHidden] = useState(false);
   const [bubble, setBubble] = useState<Bubble | null>(null);
@@ -191,7 +198,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const seen = session ? ownerOf(session) : null;
   const canModerate = session?.capabilities.includes('thread.moderate') ?? false;
   const canParticipate = session?.capabilities.includes('thread.participate') ?? false;
-  const review: Review = { client, session, seen, revision, threads, refresh, canModerate, canParticipate };
+  const review: Review = { client, session, seen, revision, threads, refresh, canModerate, canParticipate, agentLogos };
 
   // Capture : chunk chargé au premier « Commenter un élément » ou à la première correction.
   const [capture, setCapture] = useState<TabCapture | null>(null);
@@ -407,8 +414,12 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const wide = typeof window !== 'undefined' && window.innerWidth >= LIST_WIDE;
   const paneWidth = wide ? listWidthOf(pref, innerWidth) : innerWidth;
   const listWidth = listOpen ? paneWidth : 0;
+  const onLeft = side === 'left' && wide;
+  /** Largeur couverte à gauche et à droite par la liste : la page, les pastilles et la bulle vivent entre les deux. */
+  const inset = onLeft ? listWidth : 0;
+  const outset = onLeft ? 0 : listWidth;
   /** Coin haut droit de la cible, borné à la place laissée par la liste : position de la pastille et ancre de son fil. */
-  const pinAt = (r: DOMRect) => ({ x: Math.max(4, Math.min(r.right - 6, innerWidth - listWidth - 34)), y: Math.max(4, r.top - 22) });
+  const pinAt = (r: DOMRect) => ({ x: Math.max(inset + 4, Math.min(r.right - 6, innerWidth - outset - 34)), y: Math.max(4, r.top - 22) });
   const pins = useMemo(() => {
     if (pinsHidden) return [];
     const points: Array<{ t: ThreadWithMessages; x: number; y: number }> = [];
@@ -418,7 +429,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       if (r) points.push({ t, ...pinAt(r) });
     }
     return cluster(points);
-  }, [pinsHidden, threads, spots, layoutTick, listWidth]);
+  }, [pinsHidden, threads, spots, layoutTick, inset, outset]);
 
   // Écran étroit : la liste couvre la page, la bulle devient une feuille.
   const viewport = { width: innerWidth - (wide ? listWidth : 0), height: innerHeight };
@@ -442,7 +453,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const thread = bubble?.kind === 'thread' ? threads.find((t) => t.threadId === bubble.threadId) ?? null : null;
   const showBubble = bubble !== null && (bubble.kind !== 'thread' || thread !== null);
   const anchor = showBubble ? anchorOf(bubble!) : null;
-  const at = anchor ? place(anchor.box, { width: bubbleWidth, height: bubbleHeight }, viewport, anchor.near) : null;
+  const at = anchor ? placeBeside(inset, anchor.box, { width: bubbleWidth, height: bubbleHeight }, viewport, anchor.near) : null;
 
   // Contrôle qui a ouvert le fil affiché (pastille, ligne de la liste) : il reprend le focus à la fermeture, sinon la toolbar.
   const opener = useRef<HTMLElement | null>(null);
@@ -527,11 +538,12 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const startResize = (e: PointerEvent, handle: HTMLElement) => {
     if (e.button !== 0) return;
     const x0 = e.clientX;
+    const grow = onLeft ? 1 : -1;
     const w0 = paneWidth;
     let w = w0;
     handle.setPointerCapture(e.pointerId);
     setResizing(true);
-    const move = (m: PointerEvent) => setPref((w = listWidthOf(w0 + x0 - m.clientX, innerWidth)));
+    const move = (m: PointerEvent) => setPref((w = listWidthOf(w0 + grow * (m.clientX - x0), innerWidth)));
     const end = () => {
       endResize.current = null;
       handle.removeEventListener('pointermove', move);
@@ -548,10 +560,17 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const bounds = listBounds(innerWidth);
   const onResizeKey = (e: ReactKeyboardEvent) => {
     const step = e.shiftKey ? 64 : 16;
-    const next = { ArrowLeft: paneWidth + step, ArrowRight: paneWidth - step, Home: bounds.min, End: bounds.max }[e.key];
+    const next = { ArrowLeft: paneWidth + (onLeft ? -step : step), ArrowRight: paneWidth + (onLeft ? step : -step), Home: bounds.min, End: bounds.max }[e.key];
     if (next === undefined) return;
     e.preventDefault();
     keepWidth(listWidthOf(next, innerWidth));
+  };
+
+  const switchSide = () => {
+    const next = side === 'left' ? 'right' : 'left';
+    setMoreOpen(false);
+    setSide(next);
+    try { sessionStorage.setItem(SIDE_KEY, next); } catch { /* stockage indisponible : le bord reste en mémoire */ }
   };
 
   /** « Tout fermer » : liste, bulle et menus fermés, partage arrêté ; la toolbar reste. Un envoi en cours ou incertain garde son image et sa clé pour être repris. */
@@ -762,6 +781,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       else if (action === 'close') closeAll();
       else if (action === 'general') { setMoreOpen(false); setAside(null); setListOpen(true); setFocusGeneral((n) => n + 1); }
       else if (action === 'resize') { if (event.type === 'pointerdown') startResize(event as PointerEvent, control); }
+      else if (action === 'side') switchSide();
       else if (action === 'pins') { setMoreOpen(false); setPinsHidden((h) => !h); }
       else if (action === 'stop') { setMoreOpen(false); captureRef.current?.deactivate(); }
       else if (action === 'correct-selection') { const s = currentSelection(); if (s) void startCorrection(s.range.cloneRange(), s.frame); }
@@ -860,7 +880,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const shownNote = note ?? (bubble?.kind === 'draft' ? null : capture?.invalidatedNotice ?? captureNote) ?? (status?.kind === 'error' ? status.text : null);
   // Toolbar et message centrés sur la place laissée par la liste ouverte en écran large ; libellés retirés quand cette place se réduit.
   const room = innerWidth - (wide ? listWidth : 0);
-  const center = room / 2;
+  const center = inset + room / 2;
   const hasSelection = moreOpen && currentSelection() !== null;
   const { draft: written, phase } = targeted.view;
   const replacementChanged = !!written.replacement?.text.trim() && written.replacement.text.trim() !== originalOf(written.replacement.for, revision?.manifest ?? null).trim();
@@ -898,6 +918,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
             </button>
             <button type="button" role="menuitem" data-socrate-action="pins">{pinsHidden ? 'Afficher les pastilles' : 'Masquer les pastilles'}</button>
             <button type="button" role="menuitemcheckbox" aria-checked={shortcut} data-socrate-action="shortcut">Raccourci C pour commenter</button>
+            {wide && <button type="button" role="menuitem" data-socrate-action="side">{side === 'left' ? 'Ancrer la liste à droite' : 'Ancrer la liste à gauche'}</button>}
             <button type="button" role="menuitem" data-socrate-action="agents">Connecter un agent</button>
             {sharing && <button type="button" role="menuitem" data-socrate-action="stop">Arrêter le partage</button>}
           </div>
@@ -905,7 +926,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
         <span role="status" aria-live="polite" style={HIDDEN}>{announce}</span>
       </div>
       {shownNote && (
-        <p data-socrate="note" role="status" data-testid="socrate-note" style={{ left: center }}>
+        <p data-socrate="note" role="status" data-testid="socrate-note" style={{ left: center, maxWidth: Math.min(380, room - 16) }}>
           <span>{shownNote}</span>
           {(captureNote || capture?.invalidatedNotice) && !note && <button type="button" data-socrate-action="target">Réessayer</button>}
           {status?.kind === 'error' && status.retry && shownNote === status.text && <button type="button" data-socrate-action="reload">Réessayer</button>}
@@ -936,12 +957,12 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       {listOpen && wide && !triage && (
         <div data-socrate="resize" data-socrate-action="resize" role="separator" aria-orientation="vertical" aria-label="Largeur des conversations" aria-controls="socrate-frame"
           aria-valuenow={paneWidth} aria-valuemin={bounds.min} aria-valuemax={bounds.max} tabIndex={0} data-active={resizing || undefined}
-          data-socrate-tip="Glisser ou flèches gauche et droite pour régler la largeur" style={{ right: paneWidth - 5 }} onKeyDown={onResizeKey} />
+          data-socrate-tip="Glisser ou flèches gauche et droite pour régler la largeur" style={onLeft ? { left: paneWidth - 5 } : { right: paneWidth - 5 }} onKeyDown={onResizeKey} />
       )}
-      {/* Liste couvrant la page : la bande de la toolbar reste sous le panneau, hors de son composeur. */}
-      <iframe ref={listRef} id="socrate-frame" title="Revue Socrate" src="about:blank" style={{ ...LIST_STYLE, ...(!wide && { boxSizing: 'border-box', paddingBottom: 64 }), width: paneWidth, display: listOpen ? undefined : 'none', pointerEvents: resizing ? 'none' : undefined, ...(triage && TRIAGE_STYLE) }} data-socrate="panel" />
+      {/* Liste couvrant la page : la bande de la toolbar reste sous le panneau, hors de son composeur. `pointerEvents` explicite : une modale de l'hôte peut poser `none` sur son `body`, que l'iframe hériterait. */}
+      <iframe ref={listRef} id="socrate-frame" title="Revue Socrate" src="about:blank" style={{ ...LIST_STYLE, ...LIST_SIDE[onLeft ? 'left' : 'right'], ...(!wide && { boxSizing: 'border-box', paddingBottom: 64 }), width: paneWidth, display: listOpen ? undefined : 'none', pointerEvents: resizing ? 'none' : 'auto', ...(triage && TRIAGE_STYLE) }} data-socrate="panel" />
       <iframe ref={bubbleRef} id="socrate-bubble" title="Conversation Socrate" src="about:blank" data-socrate="bubble"
-        style={{ ...BUBBLE_STYLE, display: showBubble ? undefined : 'none', left: at?.x ?? 0, top: at?.y ?? 0, width: at?.sheet ? viewport.width - 16 : bubbleWidth, height: bubbleHeight, pointerEvents: resizing ? 'none' : undefined }} />
+        style={{ ...BUBBLE_STYLE, display: showBubble ? undefined : 'none', left: at?.x ?? 0, top: at?.y ?? 0, width: at?.sheet ? viewport.width - 16 : bubbleWidth, height: bubbleHeight, pointerEvents: resizing ? 'none' : 'auto' }} />
       {listDoc && createPortal(
         <Boundary>
           {!editorial && <Tip doc={listDoc.ownerDocument} />}

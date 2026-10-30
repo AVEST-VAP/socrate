@@ -179,7 +179,7 @@ A coding agent (Claude Code, Codex…) reads the feedback of your pull request a
 npx @meyer0x/socrate login            # inside Claude Code or Codex the agent is detected; otherwise --agent <name>
 ```
 
-The command prints a code such as `KPXD-4821`. Open a preview of the project where you are signed in, choose **Plus d'options → Connecter un agent** in the Socrate toolbar, enter the code, check the agent and machine, and click **Autoriser**. Only approve a code you just requested. The agent can then, for 30 days, read every review of the project, reply, resolve and reopen threads; it cannot create threads. Its messages show "Your Name · via Claude". Revoke it under **Mes agents** in the panel, or with `npx @meyer0x/socrate logout`.
+The command prints a code such as `KPXD-4821`. Open a preview of the project where you are signed in, choose **Plus d'options → Connecter un agent** in the Socrate toolbar, enter the code, check the agent and machine, and click **Autoriser**. Only approve a code you just requested. The agent can then, for 30 days, read every review of the project, reply, resolve and reopen threads; it cannot create threads. Its messages show "Claude via Your Name". Revoke it under **Mes agents** in the panel, or with `npx @meyer0x/socrate logout`.
 
 A typical loop for the agent:
 
