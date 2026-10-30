@@ -144,6 +144,8 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   const [active, setActive] = useState<string | null>(first?.threadId ?? queue[0] ?? null);
   const [zoom, setZoom] = useState<'fit' | 'target'>('fit');
   const [resolving, setResolving] = useState(false);
+  // Retour dont la résolution vient d'être confirmée : le suivant se lit dans la file relue, pas dans celle d'avant l'envoi.
+  const [passed, setPassed] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const headingRef = useRef<HTMLHeadingElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -154,6 +156,11 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   const items = queue.map((id) => threads.find((t) => t.threadId === id)).filter((t) => !!t);
   const index = items.findIndex((t) => t.threadId === active);
   const thread = items[index] ?? null;
+  if (passed && !arrived.length) {
+    setPassed(null);
+    // La personne a pu changer de retour pendant l'envoi : sa sélection prime.
+    if (active === passed) setActive(items[index + 1]?.threadId ?? null);
+  }
   const neighbours = thread ? [items[index - 1], thread, items[index + 1]] : [];
   const shotOf = useShots(client, neighbours.flatMap((t) => (t?.capture ? [t.capture.captureId] : [])));
   const shown = thread?.capture ? shotOf(thread.capture.captureId) : null;
@@ -176,8 +183,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
     setResolving(true);
     const done = await changeState(review, thread);
     setResolving(false);
-    // La personne a pu changer de retour pendant l'envoi : sa sélection prime.
-    if (done) setActive((id) => (id === thread.threadId ? items[index + 1]?.threadId ?? null : id));
+    if (done) setPassed(thread.threadId);
   };
 
   useEffect(() => {

@@ -29,7 +29,7 @@ test('point du clic : coin à moins de 24 px dans les deux axes, retourné au-de
 });
 
 test('libellé de conteneur : un nom de composant n’est pas un nom, sans casse, accents ni ponctuation', () => {
-  for (const label of ['Dialog', 'dialog', 'MODAL', 'Modale', 'Drawer', 'Fenêtre', 'Boîte de dialogue', ' Pop-up ']) assert.equal(isGenericLabel(label), true, label);
+  for (const label of ['Dialog', 'dialog', 'MODAL', 'Modale', 'Drawer', 'Fenêtre', 'Boîte de dialogue', ' Pop-up ', 'Pop-in', 'Pop-over']) assert.equal(isGenericLabel(label), true, label);
   for (const label of ['Modifier le client', 'Dialog client', 'Nouveau rendez-vous']) assert.equal(isGenericLabel(label), false, label);
   const hint = (container: Target['container']) => openContainerHint({ container } as Target);
   assert.equal(hint({ label: 'Dialog' }), 'C’était dans une fenêtre ou un panneau. Ouvrez-le pour retrouver l’élément.', 'ancien fil');

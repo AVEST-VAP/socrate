@@ -4,6 +4,23 @@ import type { Converting, DraftAttachment, ReviewClient } from './client.ts';
 
 // Pièces jointes humaines : préparation locale, aperçu avant envoi et lecture protégée, chargées au premier usage, jamais à l'ouverture.
 
+// Styles de cette vue, dans son chunk : le panneau chargé à l'arrivée n'en porte rien.
+const MEDIA_CSS = `
+.socrate-tray { padding: 2px 6px 4px; }
+.socrate-tray ul, .socrate-media { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.socrate-tray > p { margin: 6px 4px 0; }
+.socrate-chip { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 4px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; }
+.socrate-chip-preview { width: 32px; height: 32px; flex-shrink: 0; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: #f4f4f5; color: #71717a; }
+.socrate-chip-preview img, .socrate-chip-preview video { width: 100%; height: 100%; object-fit: cover; }
+.socrate-chip-text { min-width: 0; flex: 1; display: grid; }
+.socrate-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 500; }
+.socrate-media { margin-top: 8px; }
+.socrate-media-item { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.socrate-media-item img, .socrate-media-item video { display: block; width: 100%; max-height: 220px; object-fit: contain; border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; }
+.socrate-media-load { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 40px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; }
+.socrate-media-load:hover { background: #f4f4f5; }
+`;
+
 const FORMATS = 'PNG, JPEG ou WebP jusqu’à 10 Mio, MP4 ou WebM jusqu’à 50 Mio, sinon 15 min';
 const isVideo = (t: AttachmentType) => ATTACHMENT_TYPES[t].media === 'video';
 
@@ -125,6 +142,7 @@ function DraftChip({ item, disabled, onRemove }: { item: DraftAttachment; disabl
 export function AttachmentTray({ items, converting, disabled, onRemove }: { items: readonly DraftAttachment[]; converting: Converting | null; disabled: boolean; onRemove: (id: string) => void }) {
   return (
     <div className="socrate-tray">
+      <style>{MEDIA_CSS}</style>
       <ul aria-label="Pièces à envoyer">
         {items.map((it) => <DraftChip key={it.id} item={it} disabled={disabled} onRemove={() => onRemove(it.id)} />)}
         {converting && (
@@ -185,8 +203,11 @@ export function MessageMedia({ client, attachments }: { client: ReviewClient; at
   const session = client.currentSession;
   const owner = JSON.stringify([session?.actor.key, session?.exploring]);
   return (
-    <ul className="socrate-media" aria-label={`${attachments.length} pièce${attachments.length > 1 ? 's' : ''} jointe${attachments.length > 1 ? 's' : ''}`}>
-      {attachments.map((a) => <Published key={`${owner}:${a.attachmentId}`} client={client} a={a} />)}
-    </ul>
+    <>
+      <style>{MEDIA_CSS}</style>
+      <ul className="socrate-media" aria-label={`${attachments.length} pièce${attachments.length > 1 ? 's' : ''} jointe${attachments.length > 1 ? 's' : ''}`}>
+        {attachments.map((a) => <Published key={`${owner}:${a.attachmentId}`} client={client} a={a} />)}
+      </ul>
+    </>
   );
 }

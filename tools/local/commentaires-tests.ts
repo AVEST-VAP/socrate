@@ -3155,6 +3155,42 @@ test('vue de traitement au clavier : file stable, capture entière, images voisi
   } finally { await claire.context.close(); }
 });
 
+test('vue de traitement : un retour arrivé pendant la résolution du dernier devient le suivant, sans fin de file', async () => {
+  const ctx = await browser.newContext(origins());
+  try {
+    await db().prepare("UPDATE threads SET state = 'resolved' WHERE state = 'open'").run();
+    const page = await loginAs(ctx, 'Karim Benali, développeur', '/reglages/rappels');
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    const publish = async (body: string) => {
+      await list(page).getByRole('textbox', { name: 'Votre commentaire global' }).fill(body);
+      await send(page);
+      await list(page).locator('[data-testid="socrate-row"]', { hasText: body }).waitFor();
+      return (await threadOf(body))!.thread_id;
+    };
+    const last = await publish('Avance : dernier retour de la file.');
+    const late = await publish('Avance : retour arrivé pendant la résolution.');
+    const setState = (state: string) => db().prepare('UPDATE threads SET state = ? WHERE thread_id = ?').bind(state, late).run();
+    await setState('resolved');
+    await page.reload();
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    await list(page).getByTestId('socrate-triage-open').click();
+    const triage = list(page).locator(`[data-testid="socrate-triage"][data-thread="${last}"]`);
+    await triage.waitFor();
+    assert.equal(await triage.getByTestId('socrate-triage-position').innerText(), '1/1');
+
+    // Sans sondage, le retour n'est connu de la page qu'à la relecture qui suit la résolution.
+    await setState('open');
+    await triage.getByTestId('socrate-triage-resolve').click();
+    const next = list(page).locator(`[data-testid="socrate-triage"][data-thread="${late}"]`);
+    await next.waitFor();
+    assert.equal(await next.getByTestId('socrate-triage-position').innerText(), '2/2');
+    assert.equal(await next.getByTestId('socrate-triage-done').count(), 0);
+    assert.deepEqual(ctx.blocked, []);
+  } finally { await ctx.context.close(); }
+});
+
 test('nouveau déploiement sans identifiant éditorial : un seul candidat de même rôle au même début de texte devient une position probable ; deux candidats ou un autre rôle, aucune pastille', async () => {
   const ctx = await browser.newContext(origins());
   try {
