@@ -11,7 +11,7 @@ In a real review, 9 of the 11 replies of the developer were instructions for the
 - **`@agent` is a word in the message body.** It triggers nothing. The person starts the agent; the agent runs `threads --for-agent`.
 - **The state is derived from the messages**, by one pure function shared by the CLI and the panel: `pending`, `answered` or `superseded`. No column, no migration, no service change.
 - **Only the signed-in person's instructions count.** The token holder's own `@agent` messages, never a reviewer's: thread text is untrusted input, and anyone able to comment would otherwise be able to drive the developer's agent.
-- **A person's message after the instruction cancels it**, whoever wrote it. The agent reads the conversation again rather than act on a stale decision.
+- **A person's message after the instruction cancels it**, whoever wrote it, even after the agent answered. The agent reads the conversation again rather than act on a stale decision.
 - **`--after <seq>` guards the write** from the CLI.
 
 ## Limits

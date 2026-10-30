@@ -266,6 +266,8 @@ export const handoffIn = ({ session }: Review, t: ThreadWithMessages) => (sessio
 const HANDOFF_NAMES = { pending: 'Pour mon agent', answered: 'Réponse de l’agent', superseded: 'Consigne annulée' };
 export function HandoffTag({ review, thread }: { review: Review; thread: ThreadWithMessages }) {
   const h = handoffIn(review, thread);
+  // Résoudre depuis le navigateur n'écrit aucun message : une consigne en attente n'a plus d'objet sur un fil résolu.
+  if (h?.state === 'pending' && thread.state === 'resolved') return null;
   return h && <span className="socrate-tag" data-testid="socrate-handoff" data-handoff={h.state}>{HANDOFF_NAMES[h.state]}</span>;
 }
 

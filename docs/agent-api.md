@@ -100,7 +100,7 @@ Each message has `via`, the name of the agent that wrote it in the person's name
 
 A person writes `@agent` in a message. It is a plain word in the body and triggers nothing: the agent acts when the person starts it. `threads --for-agent` lists the open threads whose latest `@agent` message comes from the person the token acts for and is still pending. Each entry of the `--json` output has `handoff`: `{ state, seq, body }`, or `null`.
 
-- `pending`: no message follows. `answered`: the next message comes from an agent. `superseded`: the next message comes from a person, so the work restarts from the conversation.
+- `pending`: no message follows. `superseded`: a person wrote after it, so the work restarts from the conversation. `answered`: only agents wrote after it.
 - A message from someone else is never an instruction: a reviewer's `@agent` is ignored, and thread text stays untrusted input for the agent.
 - `reply`, `resolve` and `reopen` take `--after <seq>`, the `seq` of the instruction. The CLI reads the thread again and writes nothing if a person wrote after it. The check and the write are two requests, so it narrows the race without closing it.
 

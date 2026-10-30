@@ -14,6 +14,7 @@ test('consigne : dernière de la personne, en attente, répondue par un agent, a
   assert.deepEqual(handoffOf(asked, 'dev'), { state: 'pending', seq: 2, body: '@agent agrandis-le' });
   assert.equal(handoffOf([...asked, msg(3, 'dev', 'Agrandi.', 'Claude')], 'dev')?.state, 'answered');
   assert.equal(handoffOf([...asked, msg(3, 'po', 'Finalement non.')], 'dev')?.state, 'superseded');
+  assert.equal(handoffOf([...asked, msg(3, 'dev', 'Agrandi.', 'Claude'), msg(4, 'po', 'Finalement non.')], 'dev')?.state, 'superseded', 'une personne après la réponse de l’agent annule aussi');
   assert.deepEqual(handoffOf([...asked, msg(3, 'po', 'Non.'), msg(4, 'dev', '@agent garde-le')], 'dev'), { state: 'pending', seq: 4, body: '@agent garde-le' });
 });
 
