@@ -11,20 +11,23 @@ const MENTIONS_CSS = `
 .socrate-mentions li[data-active] { background: #eff6ff; }
 `;
 
-const known = new WeakMap<ReviewClient, Promise<Actor[]>>();
+const known = new WeakMap<ReviewClient, { at: number; asked: Promise<Actor[]> }>();
+const FRESH_MS = 60_000;
 
-/** Personnes qui ont déjà écrit sur le projet, lues une fois par client ; un échec laisse la saisie libre et sera retenté. */
+/** Personnes qui ont déjà écrit sur le projet, gardées une minute : un nouvel auteur arrive sans recharger, et une frappe ne fait pas une requête. Un échec laisse la saisie libre et sera retenté. */
 function peopleOf(client: ReviewClient): Promise<Actor[]> {
   const cached = known.get(client);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.at < FRESH_MS) return cached.asked;
   const url = `${client.preview.serviceUrl}/v1/projects/${encodeURIComponent(client.preview.projectId)}/people`;
   const asked = (async () => {
-    const session = client.currentSession ?? (await client.openSession());
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${session.sessionToken}` }, signal: client.signal });
+    const read = (token: string) => fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: client.signal });
+    let res = await read((client.currentSession ?? (await client.openSession())).sessionToken);
+    // Session expirée pendant la saisie : une seule reprise avec une session neuve.
+    if (res.status === 401) res = await read((await client.openSession()).sessionToken);
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as { items: Actor[] }).items;
   })();
-  known.set(client, asked);
+  known.set(client, { at: Date.now(), asked });
   asked.catch(() => known.delete(client));
   return asked;
 }

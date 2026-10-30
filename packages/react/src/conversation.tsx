@@ -178,10 +178,9 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
   // Safari distribue `compositionend` avant le keydown d'Entrée qui valide la composition : ce keydown n'envoie pas.
   const composed = useRef(false);
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mention && names.length) {
-      const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? names.length - 1 : 0;
-      if (step) { e.preventDefault(); setActive((a) => (a + step) % names.length); return; }
-      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); pickMention(names[active] ?? names[0]!); return; }
+    if (mention && names.length && !e.nativeEvent.isComposing && e.keyCode !== 229 && !composed.current) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : names.length - 1)) % names.length); return; }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); pickMention(names[active] ?? names[0]!); return; }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMention(null); return; }
     }
     if (!onSend || e.key !== 'Enter' || e.shiftKey || e.altKey) return;
@@ -217,7 +216,7 @@ export function Composer({ me, label, placeholder, value, onChange, onSend, canS
         <label htmlFor={id} className="socrate-visually-hidden">{label}</label>
         <textarea ref={field} id={id} rows={1} value={value} placeholder={placeholder} readOnly={busy} disabled={disabled}
           aria-keyshortcuts={onSend ? 'Enter Meta+Enter Control+Enter' : undefined}
-          aria-activedescendant={mention && names.length ? `socrate-mention-${active}` : undefined}
+          aria-autocomplete={onSend && mentionClient ? 'list' : undefined} aria-controls={mention && names.length ? 'socrate-mentions' : undefined} aria-activedescendant={mention && names.length ? `socrate-mention-${active}` : undefined}
           onChange={(e) => { onChange(e.target.value); readMention(e.target); }}
           onSelect={(e) => { if (mention) readMention(e.currentTarget); }}
           onBlur={() => setMention(null)}
