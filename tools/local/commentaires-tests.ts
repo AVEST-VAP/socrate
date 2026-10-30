@@ -535,7 +535,7 @@ test('R26 ancrage : contrôle vide parmi des jumeaux, ligne répétée recyclée
     // Fil sans cible sur la page : lisible et répondable depuis la liste, aucune action de localisation proposée.
     await control(page, 'launcher').click();
     const row = list(page).locator(`[data-testid="socrate-row"][data-thread="${ids.martin}"]`);
-    await row.getByRole('button', { name: 'Voir où c’était' }).waitFor();
+    await row.getByRole('button', { name: 'Traiter ce retour' }).waitFor();
     assert.equal(await row.getByRole('button', { name: 'Voir sur la page' }).count(), 0);
     await row.locator('.socrate-row').click();
     const conv = row.getByTestId('socrate-conversation');
@@ -1602,7 +1602,7 @@ test('liste : ouvertes de cet écran par défaut, généraux toujours visibles, 
   assert.match(autre, /Autre page · \/rendez-vous\/rdv-1042/, 'page du fil indiquée');
   assert.equal(arrivee, '/rendez-vous/rdv-1042', 'navigation explicite vers la page du fil');
   assert.equal(absente.route, '/rendez-vous/rdv-1042');
-  assert.match(absente.ligne, /Voir où c’était/, `cible ambiguë : aucune pastille arbitraire, fil lisible ${all}`);
+  assert.match(absente.ligne, /Traiter ce retour/, `cible ambiguë : aucune pastille arbitraire, fil lisible ${all}`);
   assert.equal(absente.pastille, 0);
   assert.equal(erreur.vide, 0, `erreur de lecture jamais présentée comme liste vide ${all}`);
   assert.match(erreur.alerte, /Service momentanément indisponible/, `erreur de lecture nommée ${all}`);
@@ -2821,7 +2821,7 @@ async function comment(page: Page, on: Locator, body: string) {
   return (await threadOf(body))!.thread_id;
 }
 
-test('voir où c’était (échelle 2, page défilée) : capture recadrée et encadrée à l’échelle exacte, fenêtre nommée ou rien pour un ancien retour, Réessayer après ouverture de la fenêtre', async () => {
+test('cible absente de l’écran (échelle 2, page défilée) : vue de traitement, zoom sur la cible à l’échelle exacte, fenêtre nommée ou rien pour un ancien retour, Voir dans la preview avec consigne puis cible retrouvée', async () => {
   const ctx = await browser.newContext(origins(), { deviceScaleFactor: 2 });
   try {
     const page = await loginAs(ctx, 'Claire Morel, relectrice produit', '/reglages/rappels');
@@ -2847,9 +2847,9 @@ test('voir où c’était (échelle 2, page défilée) : capture recadrée et en
 
     // Libellé long coupé au milieu d'un émoji : tronqué par points de code, accepté par le service du premier coup.
     const MODAL = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
-    await intro.evaluate((el, m) => el.closest(m)!.setAttribute('aria-label', `${'x'.repeat(78)}😀 et la suite du libellé`), MODAL);
+    await intro.evaluate((el, m) => { const box = el.closest<HTMLElement>(m)!; box.dataset.labelledby = box.getAttribute('aria-labelledby')!; box.removeAttribute('aria-labelledby'); box.setAttribute('aria-label', `${'x'.repeat(78)}😀 et la suite du libellé`); }, MODAL);
     const emoji = await comment(page, intro, 'Libellé de fenêtre coupé sur un émoji.');
-    await intro.evaluate((el, m) => el.closest(m)!.removeAttribute('aria-label'), MODAL);
+    await intro.evaluate((el, m) => { const box = el.closest<HTMLElement>(m)!; box.removeAttribute('aria-label'); box.setAttribute('aria-labelledby', box.dataset.labelledby!); }, MODAL);
     assert.deepEqual((await targetOf(emoji)).container, { label: `${'x'.repeat(78)}…` }, 'aucune moitié d’émoji, 80 unités UTF-16 au plus');
     assert.deepEqual(toService(ctx, (r) => r.method === 'POST' && path(r).endsWith('/targeted')).slice(2).map((r) => 'container' in JSON.parse(r.postData!).target), [true], 'un seul envoi, sans repli');
 
@@ -2864,23 +2864,18 @@ test('voir où c’était (échelle 2, page défilée) : capture recadrée et en
     await page.getByTestId('scene-dialog').getByRole('button', { name: 'Fermer' }).click();
     await page.getByTestId('scene-dialog').waitFor({ state: 'hidden' });
 
-    // Même déploiement, fenêtre fermée : l'élément n'est pas affiché, la page n'a pas changé.
+    // Même déploiement, fenêtre fermée : la ligne ouvre la vue de traitement sur ce retour, et sa fermeture rend le focus à la ligne.
     await control(page, 'launcher').click();
-    await row(page, id).getByRole('button', { name: 'Voir où c’était' }).click();
-    const same = list(page).getByTestId('socrate-where');
-    assert.equal(await same.getByTestId('socrate-where-why').innerText(), 'L’élément n’est pas affiché sur cet écran pour le moment (fenêtre fermée, onglet, données différentes). Voici où il était quand le retour a été écrit.');
-    // Réessayer garde le focus pendant la recherche : désactivé pour l'accessibilité, jamais retiré de l'ordre de tabulation.
-    const retry = same.getByRole('button', { name: 'Réessayer' });
-    await retry.focus();
-    await page.keyboard.press('Enter');
-    const during = await retry.evaluate((b) => ({ disabled: (b as HTMLButtonElement).disabled, aria: b.getAttribute('aria-disabled'), focused: b.ownerDocument.activeElement === b }));
-    await same.getByTestId('socrate-where-missed').waitFor();
-    assert.deepEqual(during, { disabled: false, aria: 'true', focused: true }, 'Réessayer en cours : aria-disabled, focus conservé');
-    assert.equal(await retry.getAttribute('aria-disabled'), 'false');
-    await shot(page, 'voir-ou-cetait-meme-deploiement');
-    await list(page).getByRole('button', { name: 'Retour aux conversations' }).click();
-    await row(page, id).getByRole('button', { name: 'Voir où c’était' }).waitFor();
-    assert.equal(await list(page).locator(':focus').getAttribute('data-testid'), 'socrate-missing', 'retour : focus sur « Voir où c’était » de la ligne');
+    await row(page, id).getByRole('button', { name: 'Traiter ce retour' }).click();
+    const triage = list(page).getByTestId('socrate-triage');
+    await triage.waitFor();
+    assert.equal(await triage.getAttribute('data-thread'), id);
+    assert.match(await triage.getByTestId('socrate-triage-context').innerText(), /Dans la fenêtre « Modèle de rappel court »/);
+    await list(page).getByRole('heading', { name: 'Traiter les retours' }).waitFor();
+    await page.keyboard.press('Escape');
+    await triage.waitFor({ state: 'detached' });
+    await row(page, id).getByRole('button', { name: 'Traiter ce retour' }).waitFor();
+    assert.equal(await list(page).locator(':focus').getAttribute('data-testid'), 'socrate-missing', 'fermeture : focus sur le bouton de la ligne');
     assert.equal(await list(page).locator(':focus').evaluate((b) => b.closest('[data-testid="socrate-row"]')!.getAttribute('data-thread')), id);
     await control(page, 'launcher').click();
 
@@ -2889,21 +2884,23 @@ test('voir où c’était (échelle 2, page défilée) : capture recadrée et en
     await toolbarReady(page);
     await control(page, 'launcher').click();
     for (const t of [ancien, id]) {
-      await row(page, t).getByRole('button', { name: 'Voir où c’était' }).waitFor();
+      await row(page, t).getByRole('button', { name: 'Traiter ce retour' }).waitFor();
       assert.doesNotMatch(await row(page, t).innerText(), /introuvable|Voir sur la page/);
     }
 
-    await row(page, ancien).getByRole('button', { name: 'Voir où c’était' }).click();
+    await row(page, ancien).getByRole('button', { name: 'Traiter ce retour' }).click();
     await list(page).getByTestId('socrate-where-image').waitFor();
-    assert.equal(await list(page).getByTestId('socrate-where-container').count(), 0, 'ancien retour : aucune fenêtre annoncée');
-    await list(page).getByRole('button', { name: 'Retour aux conversations' }).click();
+    assert.doesNotMatch(await list(page).getByTestId('socrate-triage-context').innerText(), /fenêtre/, 'ancien retour : aucune fenêtre annoncée');
+    await page.keyboard.press('Escape');
 
-    await row(page, id).getByRole('button', { name: 'Voir où c’était' }).click();
-    const where = list(page).getByTestId('socrate-where');
-    assert.equal(await where.getByTestId('socrate-where-why').innerText(), 'Cette version de la page a changé : l’élément n’est pas retrouvé avec certitude. Voici où il était quand le retour a été écrit.');
-    assert.equal(await where.getByTestId('socrate-where-container').innerText(), 'C’était dans la fenêtre « Modèle de rappel court ». Ouvrez-la, puis cliquez sur Réessayer.');
+    await row(page, id).getByRole('button', { name: 'Traiter ce retour' }).click();
+    const where = list(page).getByTestId('socrate-triage');
+    assert.match(await where.getByTestId('socrate-triage-context').innerText(), /Écrit sur une version précédente de la page/);
     const canvas = where.getByTestId('socrate-where-image');
     await canvas.waitFor();
+    await where.locator('[data-testid="socrate-where-image"][data-whole]').waitFor();
+    await where.getByRole('button', { name: 'Cible', exact: true }).click();
+    await where.locator('[data-testid="socrate-where-image"]:not([data-whole])').waitFor();
     const capture = await db().prepare('SELECT c.capture_id, c.width, c.height FROM targets t JOIN captures c USING (project_id, review_key, capture_id) WHERE t.thread_id = ?').bind(id).first<{ capture_id: string; width: number; height: number }>();
     assert.deepEqual([capture!.width, capture!.height], [target.viewport.width * 2, target.viewport.height * 2], 'image à l’échelle 2');
     const png = Buffer.from(await (await fetch(`${API()}/captures/${capture!.capture_id}`, { headers: { Authorization: `Bearer ${stack.credentials.agent}` } })).arrayBuffer());
@@ -2944,15 +2941,17 @@ test('voir où c’était (échelle 2, page défilée) : capture recadrée et en
     assert.equal(await canvas.getAttribute('data-frame'), [Math.round(r.x * 2), Math.round(r.y * 2), Math.round(r.width * 2), Math.round(r.height * 2)].join(','));
     await shot(page, 'voir-ou-cetait-entiere');
 
-    await where.getByRole('button', { name: 'Réessayer' }).click();
-    await where.getByTestId('socrate-where-missed').waitFor();
+    // Voir dans la preview : la vue se ferme ; fenêtre fermée, la consigne dit laquelle ouvrir et la pastille revient à son ouverture.
+    await where.getByTestId('socrate-triage-show').click();
+    await where.waitFor({ state: 'detached' });
+    await page.getByTestId('socrate-note').getByText('C’était dans la fenêtre « Modèle de rappel court ». Ouvrez-la pour retrouver l’élément.').waitFor();
     await page.getByTestId('open-courte').click();
     await intro.waitFor();
-    await where.getByRole('button', { name: 'Réessayer' }).click();
+    const located = list(page).locator(`[data-testid="socrate-row"][data-thread="${id}"]`).getByRole('button', { name: 'Voir sur la page' });
+    await located.click();
     const conv = bubble(page).locator(`[data-testid="socrate-conversation"][data-thread="${id}"]`);
     await conv.waitFor({ timeout: 10_000 });
     await conv.getByText(body).waitFor();
-    assert.equal(await list(page).getByTestId('socrate-where').count(), 0, 'retrouvée : la vue laisse place au fil sur la page');
     const pin = page.locator(`[data-socrate="pin"][data-threads~="${id}"]`);
     await pin.waitFor();
     assert.equal(await pin.getAttribute('data-probable'), 'true');
@@ -2960,6 +2959,196 @@ test('voir où c’était (échelle 2, page défilée) : capture recadrée et en
     await shot(page, 'voir-ou-cetait-reessayer');
     assert.deepEqual(ctx.blocked, []);
   } finally { await ctx.context.close(); }
+});
+
+test('vue de traitement au clavier : file stable, capture entière, images voisines, brouillon conservé, résolution confirmée avant d’avancer, droits, raccourci désactivé, fin de file et écran étroit', async () => {
+  const ctx = await browser.newContext(origins());
+  try {
+    await db().prepare("UPDATE threads SET state = 'resolved' WHERE state = 'open'").run();
+    const page = await loginAs(ctx, 'Karim Benali, développeur', '/reglages/rappels');
+    await toolbarReady(page);
+    const MODAL = '[data-testid="scene-dialog"]';
+    await page.getByTestId('open-courte').click();
+    const intro = page.getByTestId('scene-intro');
+    await intro.waitFor();
+    const inDialog = await comment(page, intro, 'Traitement : retour dans la fenêtre.');
+    assert.deepEqual((await targetOf(inDialog)).container, { label: 'Modèle de rappel court' }, 'aria-labelledby');
+
+    // Libellé générique : remplacé par le vrai titre, jamais enregistré, même seul.
+    await page.locator(MODAL).evaluate((el) => { el.dataset.labelledby = el.getAttribute('aria-labelledby')!; el.removeAttribute('aria-labelledby'); el.setAttribute('aria-label', 'Dialog'); });
+    const generic = await comment(page, intro, 'Traitement : fenêtre au libellé générique.');
+    assert.deepEqual((await targetOf(generic)).container, { label: 'Modèle de rappel court' }, 'premier titre à la place de « Dialog »');
+    await page.locator(MODAL).evaluate((el) => { el.dataset.title = el.querySelector('h2')!.textContent!; el.querySelector('h2')!.textContent = 'Modale'; });
+    const nameless = await comment(page, intro, 'Traitement : fenêtre sans nom.');
+    assert.deepEqual((await targetOf(nameless)).container, {}, 'aucun libellé enregistré');
+    await page.locator(MODAL).evaluate((el) => { el.querySelector('h2')!.textContent = el.dataset.title!; el.setAttribute('aria-labelledby', el.dataset.labelledby!); el.removeAttribute('aria-label'); });
+    await page.getByTestId('scene-dialog').getByRole('button', { name: 'Fermer' }).click();
+    await page.getByTestId('scene-dialog').waitFor({ state: 'hidden' });
+    // Ancien fil au libellé générique : formulation sans nom.
+    await db().prepare("UPDATE targets SET context = json_set(context, '$.container.label', 'Dialog') WHERE thread_id = ?").bind(generic).run();
+
+    await control(page, 'launcher').click();
+    await list(page).getByRole('textbox', { name: 'Votre commentaire global' }).fill('Traitement : commentaire général.');
+    await send(page);
+    const general = await (async () => { await list(page).locator('[data-testid="socrate-row"]', { hasText: 'Traitement : commentaire général.' }).waitFor(); return (await threadOf('Traitement : commentaire général.'))!.thread_id; })();
+
+    // Ouverture : iframe à toute la fenêtre, sans navigation de l'hôte, toolbar masquée, focus sur le titre de la région.
+    const url = page.url();
+    const before = toService(ctx, (r) => path(r).includes('/captures/')).length;
+    const open = list(page).getByTestId('socrate-triage-open');
+    assert.equal(await open.innerText(), 'Traiter les 4 retours');
+    await open.click();
+    const triage = list(page).getByTestId('socrate-triage');
+    await triage.waitFor();
+    const heading = list(page).getByRole('heading', { name: 'Traiter les retours' });
+    await heading.waitFor();
+    assert.equal(await list(page).locator(':focus').innerText(), 'Traiter les retours');
+    assert.deepEqual(await page.locator('#socrate-frame').boundingBox(), { x: 0, y: 0, width: 1280, height: 720 });
+    assert.equal(page.url(), url, 'aucune navigation dans l’hôte');
+    assert.equal(await toolbar(page).isVisible(), false);
+    const position = triage.getByTestId('socrate-triage-position');
+    const rows = triage.getByTestId('socrate-triage-row');
+    assert.equal(await position.innerText(), '1/4');
+    assert.equal(await rows.count(), 4);
+    const order = await rows.evaluateAll((l) => l.map((e) => (e as HTMLElement).dataset.thread!));
+    await triage.locator('[data-testid="socrate-where-image"][data-whole]').waitFor();
+    assert.equal(await triage.getByRole('button', { name: 'Ajuster' }).getAttribute('aria-pressed'), 'true', 'capture entière par défaut');
+    const fetched = () => new Set(toService(ctx, (r) => path(r).includes('/captures/')).slice(before).map(path)).size;
+    assert.ok(fetched() <= 2, `actif et voisin seulement (${fetched()})`);
+    await shot(page, 'traitement-1280');
+
+    // Un clic sur l'image zoome, un second revient ; le zoom est un simple affichage de la capture.
+    await triage.getByRole('button', { name: 'Zoomer sur la cible' }).click();
+    await triage.locator('[data-testid="socrate-where-image"]:not([data-whole])').waitFor();
+    await triage.getByRole('button', { name: 'Voir la capture entière' }).click();
+    await triage.locator('[data-testid="socrate-where-image"][data-whole]').waitFor();
+    await heading.focus();
+
+    // Navigation au clavier, file stable ; commentaire général sur une carte sans image.
+    const at = async (id: string, label: string) => { await list(page).locator(`[data-testid="socrate-triage"][data-thread="${id}"]`).waitFor(); assert.equal(await position.innerText(), label); };
+    await page.keyboard.press('j');
+    await at(order[1]!, '2/4');
+    await page.keyboard.press('ArrowDown');
+    await at(order[2]!, '3/4');
+    await page.keyboard.press('k');
+    await at(order[1]!, '2/4');
+    await page.keyboard.press('ArrowUp');
+    await at(order[0]!, '1/4');
+    await triage.locator(`[data-testid="socrate-triage-row"][data-thread="${general}"] button`).click();
+    await triage.getByTestId('socrate-triage-card').getByText('Commentaire général').waitFor();
+    assert.equal(await triage.getByTestId('socrate-where-image').count(), 0);
+    assert.equal(await triage.getByTestId('socrate-triage-show').count(), 0, 'rien à montrer dans la preview');
+    await triage.locator(`[data-testid="socrate-triage-row"][data-thread="${generic}"] button`).click();
+    await at(generic, `${order.indexOf(generic) + 1}/4`);
+    assert.match(await triage.getByTestId('socrate-triage-context').innerText(), /Dans une fenêtre ou un panneau/, 'ancien libellé générique : formulation sans nom');
+    assert.doesNotMatch(await triage.innerText(), /fenêtre « Dialog »/);
+    await triage.locator(`[data-testid="socrate-triage-row"][data-thread="${order[0]}"] button`).click();
+    await at(order[0]!, '1/4');
+
+    // R ouvre la réponse ; pendant la saisie les touches écrivent, Échap quitte le champ sans fermer ; le brouillon survit au changement de retour.
+    await page.keyboard.press('r');
+    const reply = triage.getByRole('textbox', { name: /^Répondre au retour de/ });
+    assert.equal(await reply.evaluate((el) => el.ownerDocument.activeElement === el), true);
+    await page.keyboard.type('jeek');
+    assert.equal(await reply.inputValue(), 'jeek', 'r n’est pas écrit, les lettres suivantes le sont');
+    assert.equal(await position.innerText(), '1/4');
+    await page.keyboard.press('Escape');
+    assert.equal(await triage.isVisible(), true);
+    await page.keyboard.press('j');
+    await at(order[1]!, '2/4');
+    assert.equal(await reply.inputValue(), '');
+    await page.keyboard.press('k');
+    await at(order[0]!, '1/4');
+    assert.equal(await reply.inputValue(), 'jeek', 'brouillon conservé');
+    await reply.fill('');
+    await heading.focus();
+
+    // Échec : le retour reste sélectionné, erreur affichée, rien n'est résolu ; puis réussite et avance, la ligne reste dans la file.
+    const first = (await db().prepare('SELECT m.body FROM messages m WHERE m.thread_id = ? ORDER BY m.created_at LIMIT 1').bind(order[0]).first<{ body: string }>())!.body;
+    ctx.setFaults((r) => r.method === 'PUT' && path(r).endsWith('/state') ? { kind: 'respond', status: 403, body: { code: 'forbidden', message: 'Refus simulé.', requestId: 'banc', retryable: false } } : { kind: 'pass' });
+    await page.keyboard.press('e');
+    await triage.getByRole('alert').waitFor();
+    await shot(page, 'traitement-echec');
+    await at(order[0]!, '1/4');
+    assert.equal((await threadOf(first))!.state, 'open');
+    ctx.setFaults(null);
+    await page.keyboard.press('e');
+    await at(order[1]!, '2/4');
+    assert.equal((await threadOf(first))!.state, 'resolved', 'seconde lecture : résolu en base');
+    assert.equal(await rows.count(), 4, 'file stable après résolution');
+    assert.equal(await triage.locator(`[data-testid="socrate-triage-row"][data-thread="${order[0]}"]`).getAttribute('data-state'), 'resolved');
+
+    // Bouton « Suivant » sans résoudre, puis résolutions jusqu'à la fin : le retour passé reste signalé.
+    await triage.getByTestId('socrate-triage-next').click();
+    await at(order[2]!, '3/4');
+    await triage.getByTestId('socrate-triage-resolve').click();
+    await at(order[3]!, '4/4');
+    await page.keyboard.press('e');
+    const done = triage.getByTestId('socrate-triage-done');
+    await done.getByText('Fin de la file').waitFor();
+    await done.getByText('1 retour encore ouvert.').waitFor();
+    assert.equal(await triage.getByTestId('socrate-where-image').count(), 0);
+    await done.getByRole('button', { name: 'Reprendre' }).click();
+    await at(order[1]!, '2/4');
+    await triage.getByTestId('socrate-triage-resolve').click();
+    await at(order[2]!, '3/4');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    await done.getByRole('heading', { name: 'Tout est traité' }).waitFor();
+    await shot(page, 'traitement-fin');
+    await done.getByRole('button', { name: /^Voir les résolus/ }).click();
+    assert.equal(await triage.getByRole('button', { name: /^Résolues/ }).getAttribute('aria-pressed'), 'true');
+    await triage.getByRole('button', { name: /^Ouvertes/ }).click();
+    await done.waitFor();
+
+    // Fermeture : focus rendu ; le bouton d'ouverture a disparu faute de retour ouvert, le titre de la liste le reçoit.
+    await page.keyboard.press('Escape');
+    await triage.waitFor({ state: 'detached' });
+    assert.equal(await list(page).locator(':focus').innerText(), 'Conversations');
+    assert.equal(await toolbar(page).isVisible(), true);
+    assert.deepEqual(ctx.blocked, []);
+  } finally { await ctx.context.close(); }
+
+  // Relectrice sans modération : conversation et réponse, pas de résolution ; touches désactivées avec le raccourci C, Échap reste.
+  const claire = await browser.newContext(origins());
+  try {
+    await db().prepare("UPDATE threads SET state = 'open' WHERE thread_id IN (SELECT thread_id FROM messages WHERE body LIKE 'Traitement : %')").run();
+    const page = await loginAs(claire, 'Claire Morel, relectrice produit', '/reglages/rappels');
+    await toolbarReady(page);
+    await control(page, 'more').click();
+    await page.locator('[data-socrate-action="shortcut"]').click();
+    await control(page, 'launcher').click();
+    await list(page).getByTestId('socrate-triage-open').click();
+    const triage = list(page).getByTestId('socrate-triage');
+    await triage.waitFor();
+    assert.equal(await triage.getByTestId('socrate-triage-resolve').count(), 0, 'droits de la conversation repris');
+    assert.equal(await triage.getByRole('button', { name: 'Résoudre', exact: true }).count(), 0);
+    await triage.getByRole('textbox', { name: /^Répondre au retour de/ }).waitFor();
+    const position = await triage.getByTestId('socrate-triage-position').innerText();
+    await page.keyboard.press('j');
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await triage.getByTestId('socrate-triage-position').innerText(), position, 'raccourci désactivé : rien ne bouge');
+
+    // Écran étroit : une colonne, capture puis conversation, aucun débordement horizontal.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(100);
+    const geometry = await page.frameLocator('#socrate-frame').locator('body').evaluate((b) => {
+      const box = (s: string) => b.querySelector(s)!.getBoundingClientRect();
+      return { overflow: b.ownerDocument.documentElement.scrollWidth - innerWidth, stage: box('.socrate-triage-stage').bottom, side: box('.socrate-triage-side').top, width: box('.socrate-triage-side').width };
+    });
+    assert.ok(geometry.overflow <= 0 && geometry.stage <= geometry.side && geometry.width === 390, JSON.stringify(geometry));
+    await shot(page, 'traitement-390');
+    await page.keyboard.press('Escape');
+    await triage.waitFor({ state: 'detached' });
+
+    // Voir dans la preview sur écran étroit, cible absente : la page redevient visible avec la consigne.
+    await list(page).getByTestId('socrate-triage-open').click();
+    await triage.getByTestId('socrate-triage-show').click();
+    await page.getByTestId('socrate-note').getByText(/Ouvrez-la pour retrouver l’élément/).waitFor();
+    await page.locator('#socrate-frame').waitFor({ state: 'hidden' });
+    assert.equal(await toolbar(page).isVisible(), true);
+    assert.deepEqual(claire.blocked, []);
+  } finally { await claire.context.close(); }
 });
 
 test('nouveau déploiement sans identifiant éditorial : un seul candidat de même rôle au même début de texte devient une position probable ; deux candidats ou un autre rôle, aucune pastille', async () => {
@@ -3001,7 +3190,7 @@ test('nouveau déploiement sans identifiant éditorial : un seul candidat de mê
     await control(page, 'launcher').click();
     assert.match(await row(page, ids.unique).innerText(), /Voir sur la page · position probable/);
     for (const t of [ids.deux, ids.role]) {
-      await row(page, t).getByRole('button', { name: 'Voir où c’était' }).waitFor();
+      await row(page, t).getByRole('button', { name: 'Traiter ce retour' }).waitFor();
       assert.equal(await row(page, t).getByRole('button', { name: 'Voir sur la page' }).count(), 0);
     }
     await shot(page, 'position-probable-liste');
@@ -3070,7 +3259,7 @@ test('position probable refusée : sélection, cible vide dans un parent texté,
     await page.getByTestId('dossier-clos').evaluate((el) => el.remove());
     assert.deepEqual(await pinsSettle(page, { masque: { id: ids.masque, on: page.getByTestId('dossier-clos-visible'), expected: true } }), { masque: true }, 'seul et rendu : position probable');
     await control(page, 'launcher').click();
-    for (const k of ['selection', 'vide', 'fin', 'jumeau'] as const) await row(page, ids[k]).getByRole('button', { name: 'Voir où c’était' }).waitFor();
+    for (const k of ['selection', 'vide', 'fin', 'jumeau'] as const) await row(page, ids[k]).getByRole('button', { name: 'Traiter ce retour' }).waitFor();
     facts.refusProbable = { seen };
     assert.deepEqual(ctx.blocked, []);
   } finally { await ctx.context.close(); }

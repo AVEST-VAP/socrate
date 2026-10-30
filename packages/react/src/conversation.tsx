@@ -244,14 +244,19 @@ const repliesOf = (t: ThreadWithMessages) => {
   const n = t.messages.length - 1;
   return n > 0 ? `${n} réponse${n > 1 ? 's' : ''}` : '';
 };
+/** Texte d'une ligne de retour : la correction proposée, sinon le premier message. */
+export const excerptOf = (t: ThreadWithMessages) => (t.proposal ? `Correction proposée : « ${t.proposal.replacement} »` : t.messages[0]?.body || `${t.messages[0]?.attachments.length ?? 0} pièce(s) jointe(s)`);
 export const describeThread = (t: ThreadWithMessages) => [`Conversation de ${t.author.displayName}`, t.state === 'open' ? 'ouverte' : 'résolue', repliesOf(t)].filter(Boolean).join(', ');
 
 /** Auteur du fil ou modération, avec participation : seuls ceux-là voient Résoudre et Rouvrir. */
 export const canChangeState = ({ session, canModerate, canParticipate }: Review, t: ThreadWithMessages) => canParticipate && (session?.actor.key === t.author.key || canModerate);
 
-/** Transition d'état par la même intention que le bouton du fil : un échec ou une incertitude s'affiche dans ce fil et sa ligne. */
-export function changeState(review: Review, t: ThreadWithMessages): void {
-  if (review.seen) void review.client.submission({ kind: 'state', threadId: t.threadId }, STATE_LABELS, review.refresh).publish({ seen: review.seen, state: t.state === 'open' ? 'resolved' : 'open', expectedVersion: t.version });
+/** Transition d'état par la même intention que le bouton du fil : un échec ou une incertitude s'affiche dans ce fil et sa ligne. Rend vrai quand le service l'a confirmée. */
+export async function changeState(review: Review, t: ThreadWithMessages): Promise<boolean> {
+  if (!review.seen) return false;
+  const state = review.client.submission({ kind: 'state', threadId: t.threadId }, STATE_LABELS, review.refresh);
+  await state.publish({ seen: review.seen, state: t.state === 'open' ? 'resolved' : 'open', expectedVersion: t.version });
+  return state.view.phase.kind === 'confirmed';
 }
 
 export type ThreadAction = 'open' | 'state' | 'goto';
@@ -351,11 +356,11 @@ const STATE_NAMES: Record<StateFilter, string> = { open: 'Ouvertes', resolved: '
 /**
  * Liste peu dense : auteur, date, deux lignes, réponses. Par défaut, fils ouverts de cet écran ; la route enregistrée décide de l'écran, pas la localisation.
  * Les commentaires généraux portent sur la revue : présents dans les deux portées. Une ligne ouvre son fil en place, localisé ou non ;
- * « Voir sur la page » ou « Aller à la page » retrouve sa cible séparément.
+ * « Voir sur la page » ou « Aller à la page » retrouve sa cible séparément ; une cible absente de cet écran s'ouvre dans la vue de traitement, comme toute la file.
  */
-export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onWhere, onClose, headingRef, generalRef }: {
+export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onTriage, onClose, headingRef, generalRef }: {
   review: Review; title: string | null; status: Status; route: string; located: Map<string, boolean | undefined>; expanded: string | null;
-  onOpen: (threadId: string) => void; onGoto: (threadId: string) => void; onWhere: (threadId: string) => void; onClose: () => void;
+  onOpen: (threadId: string) => void; onGoto: (threadId: string) => void; onTriage: (threadId: string | null) => void; onClose: () => void;
   headingRef: RefObject<HTMLHeadingElement | null>; generalRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const { client, session, seen, threads, refresh, canParticipate } = review;
@@ -374,6 +379,7 @@ export function ConversationList({ review, title, status, route, located, expand
   const counts = { screen: threads.filter(here).filter(inState(stateFilter)).length, all: threads.filter(inState(stateFilter)).length };
   const stateCounts = { open: scoped.filter(inState('open')).length, resolved: scoped.filter(inState('resolved')).length, all: scoped.length };
   const lacksCapability = session !== null && !canParticipate;
+  const openTotal = threads.filter(inState('open')).length;
   const menuThread = menu ? threads.find((t) => t.threadId === menu.threadId) ?? null : null;
   const openMenu = (t: ThreadWithMessages, trigger: HTMLElement, x?: number, y?: number) => {
     const r = trigger.getBoundingClientRect();
@@ -401,6 +407,7 @@ export function ConversationList({ review, title, status, route, located, expand
       <div className="socrate-list-head">
         <div className="socrate-list-title">
           <h1 ref={headingRef} tabIndex={-1}>Conversations</h1>
+          {openTotal > 0 && <button type="button" className="socrate-button" style={{ minHeight: 28, padding: '0 10px' }} data-testid="socrate-triage-open" onClick={() => onTriage(null)}>Traiter {openTotal > 1 ? `les ${openTotal} retours` : 'le retour'}</button>}
           <button type="button" className="socrate-icon" aria-label="Fermer la liste" data-socrate-tip="Fermer · Échap" onClick={onClose}>{ICON.close}</button>
         </div>
         {(title || session) && (
@@ -443,7 +450,6 @@ export function ConversationList({ review, title, status, route, located, expand
         )}
         <ul className="socrate-rows" aria-label="Conversations">
           {shown.map((t) => {
-            const first = t.messages[0];
             const open = expanded === t.threadId;
             const replies = repliesOf(t);
             const onScreen = here(t);
@@ -457,7 +463,7 @@ export function ConversationList({ review, title, status, route, located, expand
                     <span>
                       <strong>{t.author.displayName}</strong>
                       <When iso={t.createdAt} />
-                      <span className="socrate-row-text">{t.proposal ? `Correction proposée : « ${t.proposal.replacement} »` : first?.body || `${first?.attachments.length ?? 0} pièce(s) jointe(s)`}</span>
+                      <span className="socrate-row-text">{excerptOf(t)}</span>
                       <span className="socrate-row-foot">
                         {replies && <span className="socrate-replies">{replies}</span>}
                         {pieces(t) > 0 && <span>{ICON.attach}{pieces(t)}<span className="socrate-visually-hidden"> pièce{pieces(t) > 1 ? 's' : ''} jointe{pieces(t) > 1 ? 's' : ''}</span></span>}
@@ -472,7 +478,7 @@ export function ConversationList({ review, title, status, route, located, expand
                 </div>
                 {!t.target ? null : !onScreen ? page && <button type="button" className="socrate-button link socrate-goto" onClick={() => onGoto(t.threadId)}>Aller à la page</button>
                   : located.has(t.threadId) ? <span className="socrate-goto socrate-meta" data-testid="socrate-located"><button type="button" className="socrate-button link" onClick={() => onGoto(t.threadId)}>Voir sur la page</button>{located.get(t.threadId) && ' · position probable'}</span>
-                  : <button type="button" className="socrate-button link socrate-goto" data-testid="socrate-missing" onClick={() => onWhere(t.threadId)}>Voir où c’était</button>}
+                  : <button type="button" className="socrate-button link socrate-goto" data-testid="socrate-missing" onClick={() => onTriage(t.threadId)}>Traiter ce retour</button>}
                 {!open && <RowState thread={t} review={review} />}
                 {open && <div className="socrate-inline"><Conversation thread={t} review={review} /></div>}
               </li>

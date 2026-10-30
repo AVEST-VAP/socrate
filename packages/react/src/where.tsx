@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Target, ThreadWithMessages } from '@socrate/contract';
 import type { ReviewClient } from './client.ts';
-import { ICON } from './conversation.tsx';
+import { openContainerHint } from './container.ts';
 
 // Styles de cette vue, dans son chunk : le panneau chargé à l'arrivée n'en porte rien.
 const WHERE_CSS = `
@@ -39,7 +39,7 @@ export function cropOf(t: Target, image: { width: number; height: number }, whol
 }
 
 /** Image recadrée (ou entière) dessinée à la résolution de la capture, cible encadrée. */
-function Shot({ bitmap, target, whole }: { bitmap: ImageBitmap; target: Target; whole: boolean }) {
+export function Shot({ bitmap, target, whole }: { bitmap: ImageBitmap; target: Target; whole: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const { crop, frame, scale } = cropOf(target, bitmap, whole);
   useEffect(() => {
@@ -62,21 +62,16 @@ function Shot({ bitmap, target, whole }: { bitmap: ImageBitmap; target: Target; 
 type Image = { kind: 'loading' } | { kind: 'ready'; bitmap: ImageBitmap } | { kind: 'none'; why: string };
 
 /**
- * « Voir où c’était » : la capture automatique du fil, recadrée et encadrée sur la cible, quand celle-ci n'est pas retrouvée avec certitude sur l'écran courant.
+ * « Voir où c’était » du panneau éditorial : la capture automatique du fil, recadrée et encadrée sur la cible, après l'échec de « Localiser la cible ».
  * Une cible enregistrée dans une fenêtre ou un panneau le dit ; un retour antérieur sans ce relevé n'en dit rien. Sans image, la route, le texte et l'extrait.
- * `onRetry` relance la recherche (après l'ouverture d'une fenêtre, par exemple) ; absent, la vue ne propose pas Réessayer et n'y renvoie pas.
  * `sameDeployment` : sur le déploiement du retour, l'élément est seulement absent de l'écran ; sur un autre, la page a changé. Chargée à la demande.
  */
-export function WhereView({ thread, client, sameDeployment, onBack, onClose, onRetry, headingRef }: {
-  thread: ThreadWithMessages; client: ReviewClient; sameDeployment: boolean; onBack?: () => void; onClose?: () => void; onRetry?: () => Promise<boolean>; headingRef?: RefObject<HTMLHeadingElement | null>;
-}) {
+export function WhereView({ thread, client, sameDeployment }: { thread: ThreadWithMessages; client: ReviewClient; sameDeployment: boolean }) {
   const t = thread.target!;
   const capture = thread.capture;
   const [image, setImage] = useState<Image>(capture ? { kind: 'loading' } : { kind: 'none', why: 'Ce retour n’a pas de capture : voici ce qui a été enregistré.' });
   const [whole, setWhole] = useState(false);
-  const [retry, setRetry] = useState<'idle' | 'busy' | 'missed'>('idle');
   useEffect(() => {
-    headingRef?.current?.focus();
     if (!capture) return;
     let bitmap: ImageBitmap | null = null;
     let live = true;
@@ -90,25 +85,10 @@ export function WhereView({ thread, client, sameDeployment, onBack, onClose, onR
       bitmap?.close();
     };
   }, [client, capture?.captureId]);
-  const again = async () => {
-    if (retry === 'busy') return;
-    setRetry('busy');
-    if (!(await onRetry!())) setRetry('missed');
-  };
-  const then = onRetry ? ', puis cliquez sur Réessayer.' : ' pour retrouver l’élément.';
-  const container = t.container && (t.container.label ? `C’était dans la fenêtre « ${t.container.label} ». Ouvrez-la${then}` : `C’était dans une fenêtre ou un panneau. Ouvrez-le${then}`);
+  const container = openContainerHint(t);
   return (
-    <div className="socrate-panel socrate-where" data-testid="socrate-where" data-thread={thread.threadId} onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented && onClose) onClose(); }}>
+    <div className="socrate-panel socrate-where" data-testid="socrate-where" data-thread={thread.threadId}>
       <style>{WHERE_CSS}</style>
-      {onBack && (
-        <div className="socrate-list-head">
-          <div className="socrate-list-title">
-            <button type="button" className="socrate-icon" aria-label="Retour aux conversations" data-socrate-tip="Retour aux conversations" onClick={onBack}>{ICON.list}</button>
-            <h1 ref={headingRef} tabIndex={-1}>Où c’était</h1>
-            {onClose && <button type="button" className="socrate-icon" aria-label="Fermer" data-socrate-tip="Fermer · Échap" onClick={onClose}>{ICON.close}</button>}
-          </div>
-        </div>
-      )}
       <div className="socrate-body">
         <p data-testid="socrate-where-why">{sameDeployment
           ? 'L’élément n’est pas affiché sur cet écran pour le moment (fenêtre fermée, onglet, données différentes). Voici où il était quand le retour a été écrit.'
@@ -119,10 +99,7 @@ export function WhereView({ thread, client, sameDeployment, onBack, onClose, onR
         {image.kind === 'none' && <p className="socrate-meta" data-testid="socrate-where-none">{image.why}</p>}
         <div className="socrate-actions">
           {image.kind === 'ready' && <button type="button" className="socrate-button secondary" onClick={() => setWhole((w) => !w)}>{whole ? 'Voir la zone de la cible' : 'Voir la capture entière'}</button>}
-          {onRetry && <button type="button" className="socrate-button secondary" aria-disabled={retry === 'busy'} onClick={() => void again()}>Réessayer</button>}
         </div>
-        {retry === 'busy' && <p className="socrate-meta" role="status">Recherche de l’élément…</p>}
-        {retry === 'missed' && <p className="socrate-status" role="status" data-testid="socrate-where-missed">Toujours pas retrouvé sur cet écran.</p>}
         <dl className="socrate-meta">
           <dt>Page</dt><dd>{t.hostRoute ?? t.route}</dd>
           {t.text && <><dt>Texte ciblé</dt><dd>« {t.text} »</dd></>}
