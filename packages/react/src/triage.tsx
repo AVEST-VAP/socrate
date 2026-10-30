@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ThreadWithMessages } from '@socrate/contract';
 import type { ReviewClient } from './client.ts';
-import { Avatar, Conversation, ICON, canChangeState, changeState, excerptOf, type Review } from './conversation.tsx';
+import { Avatar, Conversation, HandoffTag, ICON, canChangeState, changeState, excerptOf, handoffIn, type Review } from './conversation.tsx';
 import { containerLabel, openContainerHint } from './container.ts';
 import { isEditable, sameOriginRoute, screenOf } from './locate.ts';
 import type { Status } from './panel.tsx';
@@ -54,11 +54,11 @@ button.socrate-triage-shot[data-zoom="target"] { cursor: zoom-out; }
 }
 `;
 
-type Filter = 'open' | 'resolved';
+type Filter = 'open' | 'resolved' | 'agent';
+const FILTER_NAMES: Record<Filter, string> = { open: 'Ouvertes', resolved: 'Résolues', agent: 'Pour mon agent' };
 type Shown = { kind: 'loading' } | { kind: 'ready'; bitmap: ImageBitmap } | { kind: 'failed'; why: string };
 type Entry = { shown: Shown; live: boolean };
 
-const idsOf = (threads: ThreadWithMessages[], filter: Filter) => threads.filter((t) => t.state === filter).map((t) => t.threadId);
 const drop = (e: Entry) => {
   e.live = false;
   if (e.shown.kind === 'ready') e.shown.bitmap.close();
@@ -138,9 +138,10 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   review: Review; start: string | null; status: Status; shortcut: boolean; onClose: () => void; onShow: (threadId: string, hint: string) => void;
 }) {
   const { client, threads } = review;
+  const idsOf = (filter: Filter) => threads.filter((t) => (filter === 'agent' ? t.state === 'open' && handoffIn(review, t)?.state === 'pending' : t.state === filter)).map((t) => t.threadId);
   const first = threads.find((t) => t.threadId === start);
   const [filter, setFilter] = useState<Filter>(first?.state === 'resolved' ? 'resolved' : 'open');
-  const [queue, setQueue] = useState(() => idsOf(threads, filter));
+  const [queue, setQueue] = useState(() => idsOf(filter));
   const [active, setActive] = useState<string | null>(first?.threadId ?? queue[0] ?? null);
   const [zoom, setZoom] = useState<'fit' | 'target'>('fit');
   const [resolving, setResolving] = useState(false);
@@ -151,7 +152,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   const rootRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
 
-  const arrived = idsOf(threads, filter).filter((id) => !queue.includes(id));
+  const arrived = idsOf(filter).filter((id) => !queue.includes(id));
   if (arrived.length) setQueue([...queue, ...arrived]);
   const items = queue.map((id) => threads.find((t) => t.threadId === id)).filter((t) => !!t);
   const index = items.findIndex((t) => t.threadId === active);
@@ -166,14 +167,16 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   const shown = thread?.capture ? shotOf(thread.capture.captureId) : null;
   const canResolve = !!thread && thread.state === 'open' && canChangeState(review, thread);
   const page = thread?.target ? screenOf(thread.target) : null;
-  const left = items.filter((t) => t.state === filter);
+  const current = idsOf(filter);
+  const left = items.filter((t) => current.includes(t.threadId));
+  const forAgent = idsOf('agent').length;
 
   const move = (step: 1 | -1) => {
     const next = (thread ? index : items.length) + step;
     if (next >= 0) setActive(items[next]?.threadId ?? null);
   };
   const pick = (f: Filter) => {
-    const ids = idsOf(threads, f);
+    const ids = idsOf(f);
     setFilter(f);
     setQueue(ids);
     setActive(ids[0] ?? null);
@@ -244,8 +247,8 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
       <div className="socrate-triage-main" data-done={!thread || undefined}>
         <nav className="socrate-triage-queue" aria-label="File des retours">
           <div className="socrate-filter" role="group" aria-label="État">
-            {(['open', 'resolved'] as const).map((f) => (
-              <button key={f} type="button" aria-pressed={filter === f} onClick={() => pick(f)}>{f === 'open' ? 'Ouvertes' : 'Résolues'} <span className="socrate-count">{idsOf(threads, f).length}</span></button>
+            {(['open', 'resolved', 'agent'] as const).filter((f) => f !== 'agent' || forAgent > 0 || filter === 'agent').map((f) => (
+              <button key={f} type="button" aria-pressed={filter === f} onClick={() => pick(f)}>{FILTER_NAMES[f]} <span className="socrate-count">{idsOf(f).length}</span></button>
             ))}
           </div>
           <ol>
@@ -256,7 +259,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
                   <span>
                     <strong>{t.author.displayName}</strong>
                     <span className="socrate-row-text">{excerptOf(t)}</span>
-                    <span className="socrate-row-foot"><span className="socrate-tag">{t.state === 'open' ? 'Ouverte' : 'Résolue'}</span>{!t.target && <span className="socrate-tag">Général</span>}</span>
+                    <span className="socrate-row-foot"><span className="socrate-tag">{t.state === 'open' ? 'Ouverte' : 'Résolue'}</span>{!t.target && <span className="socrate-tag">Général</span>}<HandoffTag review={review} thread={t} /></span>
                   </span>
                 </button>
               </li>
@@ -305,10 +308,10 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
               {ICON.check}
               {left.length === 0 && filter === 'open' ? <h2>Tout est traité</h2> : <h2>Fin de la file</h2>}
               {left.length > 0 && <>
-                <p className="socrate-meta">{left.length} retour{left.length > 1 ? 's' : ''} encore {filter === 'open' ? `ouvert${left.length > 1 ? 's' : ''}` : `résolu${left.length > 1 ? 's' : ''}`}.</p>
+                <p className="socrate-meta">{left.length} retour{left.length > 1 ? 's' : ''} encore {filter === 'resolved' ? `résolu${left.length > 1 ? 's' : ''}` : `ouvert${left.length > 1 ? 's' : ''}`}.</p>
                 <button type="button" className="socrate-button secondary" onClick={() => setActive(left[0]!.threadId)}>Reprendre</button>
               </>}
-              <button type="button" className="socrate-button link" onClick={() => pick(filter === 'open' ? 'resolved' : 'open')}>{filter === 'open' ? `Voir les résolus (${idsOf(threads, 'resolved').length})` : `Voir les ouverts (${idsOf(threads, 'open').length})`}</button>
+              <button type="button" className="socrate-button link" onClick={() => pick(filter === 'open' ? 'resolved' : 'open')}>{filter === 'open' ? `Voir les résolus (${idsOf('resolved').length})` : `Voir les ouverts (${idsOf('open').length})`}</button>
             </div>
           </section>
         )}

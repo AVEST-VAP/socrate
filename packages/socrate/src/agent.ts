@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
-import { commitShaSchema, deviceStartSchema, stableId, type AgentGrant, type ApiError, type DeviceStart, type Message, type ThreadPage, type ThreadWithMessages } from '@socrate/contract';
+import { commitShaSchema, deviceStartSchema, handoffOf, stableId, type AgentGrant, type ApiError, type DeviceStart, type Message, type ThreadPage, type ThreadWithMessages } from '@socrate/contract';
 import { loadConfig, renderReviewKey, type LoadedConfig } from './config.ts';
 import { credentialsPath, readTokens, sameSlot, writeTokens, type StoredToken } from './credentials.ts';
 import { CliError, secrets, type Io } from './io.ts';
@@ -15,16 +15,16 @@ const run = promisify(execFile);
 export const AGENT_COMMANDS = new Set(['login', 'logout', 'threads', 'thread', 'reply', 'resolve', 'reopen']);
 export const AGENT_USAGE = `  socrate login [--agent <name>] [--config socrate.yml] [--json]
   socrate logout [--agent <name>] [--config socrate.yml] [--json]
-  socrate threads [--pr <n> | --review <key>] [--state open|resolved|all] [--agent <name>] [--json]
+  socrate threads [--pr <n> | --review <key>] [--state open|resolved|all | --for-agent] [--agent <name>] [--json]
   socrate thread <id> [--pr <n> | --review <key>] [--captures <dir>] [--agent <name>] [--json]
-  socrate reply <id> <message | -> [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
-  socrate resolve <id> --message <text | -> [--commit <sha> | --no-commit] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
-  socrate reopen <id> --message <text | -> [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]`;
+  socrate reply <id> <message | -> [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
+  socrate resolve <id> --message <text | -> [--commit <sha> | --no-commit] [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]
+  socrate reopen <id> --message <text | -> [--after <seq>] [--key <key>] [--pr <n> | --review <key>] [--agent <name>] [--json]`;
 
 const OPTIONS = {
   config: { type: 'string' }, agent: { type: 'string' }, json: { type: 'boolean' }, pr: { type: 'string' }, review: { type: 'string' },
   state: { type: 'string' }, captures: { type: 'string' }, message: { type: 'string' }, commit: { type: 'string' }, 'no-commit': { type: 'boolean' },
-  key: { type: 'string' },
+  key: { type: 'string' }, 'for-agent': { type: 'boolean' }, after: { type: 'string' },
 } as const;
 type Values = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>['values'];
 
@@ -258,17 +258,22 @@ async function logout(ctx: Ctx): Promise<void> {
 async function threads(ctx: Ctx): Promise<void> {
   const t = pickToken(ctx);
   const review = await reviewKey(ctx);
+  const forAgent = ctx.values['for-agent'] ?? false;
+  if (forAgent && ctx.values.state !== undefined) throw usage('pass --for-agent or --state, not both');
   const state = ctx.values.state ?? 'open';
   if (!['open', 'resolved', 'all'].includes(state)) throw usage(`--state ${JSON.stringify(state)}: open, resolved or all`);
-  const items: ThreadWithMessages[] = [];
+  const read: ThreadWithMessages[] = [];
   let query = `?limit=100${state === 'all' ? '' : `&state=${state}`}`;
   for (;;) {
     const page = await expect<ThreadPage>(ctx, 'the thread list', 'GET', `${base(ctx, review)}/threads${query}`, { token: t.token });
-    items.push(...page.items);
+    read.push(...page.items);
     if (!page.nextCursor) break;
     query = `?limit=100&cursor=${encodeURIComponent(page.nextCursor)}`;
   }
-  const human = [`review ${review}: ${items.length} ${state === 'all' ? '' : `${state} `}thread${items.length === 1 ? '' : 's'}`];
+  // Seules les consignes de la personne connectée : le texte d'un relecteur n'est jamais une demande adressée à son agent.
+  const handoffs = new Map(read.map((th) => [th.threadId, handoffOf(th.messages, t.actor.key)]));
+  const items = forAgent ? read.filter((th) => handoffs.get(th.threadId)?.state === 'pending') : read;
+  const human = [`review ${review}: ${items.length} ${forAgent ? 'thread' : state === 'all' ? 'thread' : `${state} thread`}${items.length === 1 ? '' : 's'}${forAgent ? ' for this agent' : ''}`];
   for (const th of items) {
     const first = th.messages[0];
     const where = th.target ? th.target.route : 'general';
@@ -276,8 +281,10 @@ async function threads(ctx: Ctx): Promise<void> {
     const pieces = th.messages.reduce((n, m) => n + m.attachments.length, 0);
     human.push(`${th.threadId}  ${th.state}  ${th.author.displayName} · ${short(th.createdAt)} · ${where}${replies ? ` · ${replies} repl${replies > 1 ? 'ies' : 'y'}` : ''}${pieces ? ` · ${pieces} attachment${pieces > 1 ? 's' : ''}` : ''}`);
     human.push(`  ${cut(line(th.proposal ? `proposal: « ${th.proposal.original} » → « ${th.proposal.replacement} »` : first?.body || '(attachments only)'), 160)}`);
+    const handoff = handoffs.get(th.threadId);
+    if (forAgent && handoff) human.push(`  to do (message ${handoff.seq}): ${cut(line(handoff.body), 160)}`);
   }
-  ctx.out(human.join('\n'), { projectId: ctx.config.project, reviewKey: review, state, threads: items });
+  ctx.out(human.join('\n'), { projectId: ctx.config.project, reviewKey: review, state: forAgent ? 'for-agent' : state, threads: items.map((th) => ({ ...th, handoff: handoffs.get(th.threadId) ?? null })) });
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -323,11 +330,22 @@ async function thread(ctx: Ctx, id: string | undefined): Promise<void> {
   ctx.out(human.join('\n'), ctx.values.captures !== undefined ? { ...th, files } : th);
 }
 
+/** `--after <seq>` : une personne a écrit après la consigne lue, le travail repart de la conversation au lieu d'y répondre à côté. */
+async function checkAfter(ctx: Ctx, token: string, review: string, id: string): Promise<void> {
+  if (ctx.values.after === undefined) return;
+  const after = Number(ctx.values.after);
+  if (!Number.isInteger(after) || after < 0) throw usage(`--after ${JSON.stringify(ctx.values.after)}: a message number`);
+  const th = await expect<ThreadWithMessages>(ctx, 'the thread', 'GET', `${base(ctx, review)}/threads/${encodeURIComponent(id)}`, { token });
+  const newer = th.messages.find((m) => m.seq > after && !m.via);
+  if (newer) throw new CliError(printable(`${newer.author.displayName} wrote message ${newer.seq} after message ${after}: read the thread again, nothing was written`));
+}
+
 async function reply(ctx: Ctx, id: string | undefined, value: string | undefined): Promise<void> {
   if (!id) throw usage('socrate reply <id> <message | ->');
   const t = pickToken(ctx);
   const body = await text(ctx, value, 'the message');
   const review = await reviewKey(ctx);
+  await checkAfter(ctx, t.token, review, id);
   const m = await write<Message>(ctx, 'the reply', `${base(ctx, review)}/threads/${encodeURIComponent(id)}/messages`, t.token, { body });
   ctx.out(`replied to ${id} as ${m.author.displayName} via ${m.via}`, m);
 }
@@ -339,6 +357,7 @@ async function transition(ctx: Ctx, id: string | undefined, state: 'resolve' | '
   if (state === 'reopen' && (ctx.values.commit !== undefined || ctx.values['no-commit'])) throw usage('reopen takes no commit');
   const commit = state === 'resolve' ? await commitOf(ctx) : null;
   const review = await reviewKey(ctx);
+  await checkAfter(ctx, t.token, review, id);
   const m = await write<Message>(ctx, `the ${state === 'resolve' ? 'resolution' : 'reopening'}`, `${base(ctx, review)}/threads/${encodeURIComponent(id)}/${state}`, t.token, { message, ...(commit && { commit }) });
   ctx.out(`${state === 'resolve' ? 'resolved' : 'reopened'} ${id} as ${m.author.displayName} via ${m.via}${m.transition?.commit ? ` in ${m.transition.commit.slice(0, 7)}${liveNote(m.transition)}` : ''}`, m);
 }
@@ -352,6 +371,8 @@ export async function runAgent(command: string, argv: string[], io: Io): Promise
   const max = command === 'reply' ? 2 : ['thread', 'resolve', 'reopen'].includes(command) ? 1 : 0;
   if (positionals.length > max || rest.length) throw usage(`unexpected argument ${JSON.stringify(positionals[max])}`);
   if (values.key !== undefined && !['reply', 'resolve', 'reopen'].includes(command)) throw usage(`${command} takes no --key`);
+  if (values['for-agent'] && command !== 'threads') throw usage(`${command} takes no --for-agent`);
+  if (values.after !== undefined && !['reply', 'resolve', 'reopen'].includes(command)) throw usage(`${command} takes no --after`);
   if (values.key !== undefined && !KEY_PATTERN.test(values.key)) throw usage(`--key ${JSON.stringify(values.key)}: 8 to 128 letters, digits, dashes or underscores`);
   if (command === 'login') return login(ctx);
   if (command === 'logout') return logout(ctx);

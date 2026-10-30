@@ -3345,6 +3345,38 @@ test('liste ancrée à gauche : page et poignée inversées, pastilles et bulle 
   } finally { await ctx.context.close(); }
 });
 
+test('consigne @agent : étiquette, filtre « Pour mon agent » de la vue de traitement, annulée par une réponse humaine', async () => {
+  const ctx = await browser.newContext(origins());
+  try {
+    const page = await loginAs(ctx, 'Karim Benali, développeur');
+    await toolbarReady(page);
+    await control(page, 'launcher').click();
+    const body = 'Consigne : le libellé du rappel déborde.';
+    await list(page).getByRole('textbox', { name: 'Votre commentaire global' }).fill(body);
+    await list(page).getByRole('button', { name: 'Envoyer' }).click();
+    const line = list(page).getByTestId('socrate-row').filter({ hasText: body });
+    await line.waitFor();
+    await list(page).getByTestId('socrate-triage-open').click();
+    const triage = list(page).getByTestId('socrate-triage');
+    await triage.waitFor();
+    assert.equal(await triage.getByRole('button', { name: /^Pour mon agent/ }).count(), 0, 'filtre absent sans consigne');
+    const row = triage.getByTestId('socrate-triage-row').filter({ hasText: body });
+    await row.click();
+    const reply = triage.getByRole('textbox', { name: /^Répondre au retour/ });
+    await reply.fill('@agent raccourcis-le');
+    await triage.getByRole('button', { name: 'Envoyer' }).click();
+    await row.getByTestId('socrate-handoff').waitFor();
+    assert.equal(await row.getByTestId('socrate-handoff').innerText(), 'Pour mon agent');
+    await triage.getByRole('button', { name: /^Pour mon agent/ }).click();
+    assert.ok((await triage.getByTestId('socrate-triage-row').count()) >= 1);
+    assert.equal(await row.count(), 1, 'la consigne est dans la file de l’agent');
+    await reply.fill('Finalement, je m’en occupe.');
+    await triage.getByRole('button', { name: 'Envoyer' }).click();
+    await row.locator('[data-handoff="superseded"]').waitFor();
+    assert.equal(await row.getByTestId('socrate-handoff').innerText(), 'Consigne annulée');
+  } finally { await ctx.context.close(); }
+});
+
 test('résolution par un agent avec commit : en attente sans déploiement postérieur, rien d’affirmé après un build sous un autre commit, en ligne depuis le déploiement qui porte le commit, rien face à un ancien service ; commit au survol, aucun identifiant de déploiement', async () => {
   const ctx = await browser.newContext(origins());
   try {

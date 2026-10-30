@@ -185,6 +185,7 @@ A typical loop for the agent:
 
 ```sh
 npx @meyer0x/socrate threads --json                          # open threads of the current branch's pull request
+npx @meyer0x/socrate threads --for-agent                     # threads you handed to your agent with @agent
 npx @meyer0x/socrate thread <id> --captures .socrate --json  # messages, target (route, text, selector, HTML) and downloaded screenshot
 # … fix the code, commit …
 npx @meyer0x/socrate reply <id> "Moved the save button out of the modal."
