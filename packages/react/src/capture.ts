@@ -1,5 +1,5 @@
 import { sha256Hex, type ImageMeta, type Target } from '@socrate/contract';
-import { isGenericLabel } from './container.ts';
+import { clip, isGenericLabel, oneLine, openerOf } from './container.ts';
 import { cleanText, contextOf, isSocrate, nearbyText, offsetOf, roleOf, sameOriginFrames, sanitizedExcerpt } from './locate.ts';
 
 export type CaptureStatus =
@@ -49,22 +49,19 @@ const isClickShield = (el: Element) => {
   const v = el.ownerDocument.defaultView!;
   return r.left <= 0 && r.top <= 0 && r.right >= v.innerWidth && r.bottom >= v.innerHeight;
 };
-/** Conteneur modal ou latéral de la cible ; son libellé : `aria-labelledby`, `aria-label` ou premier titre, le premier qui n'est pas générique, texte normalisé tronqué à 80 unités UTF-16. */
+/**
+ * Conteneur modal ou latéral de la cible ; son libellé : `aria-labelledby`, `aria-label` ou premier titre, le premier qui n'est pas générique, texte normalisé tronqué à 80 unités UTF-16.
+ * Son déclencheur (`openerOf`) quand il est retrouvé hors du conteneur.
+ */
 const MODAL = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
 function containerOf(el: Element): Target['container'] {
   const box = el.closest(MODAL);
   if (!box) return undefined;
   const named = box.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => box.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
   const heading = box.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]')?.textContent;
-  const label = [named, box.getAttribute('aria-label'), heading].map((s) => cleanText(s ?? '').replace(/\p{C}/gu, '')).find((s) => s && !isGenericLabel(s)) ?? '';
-  if (!label || label.length <= 80) return label ? { label } : {};
-  // Coupure par points de code, jamais au milieu d'une paire de substitution ; 80 unités UTF-16 au plus, comme le contrat.
-  let cut = '';
-  for (const c of label) {
-    if (cut.length + c.length > 79) break;
-    cut += c;
-  }
-  return { label: `${cut}…` };
+  const label = [named, box.getAttribute('aria-label'), heading].map((s) => oneLine(s ?? '')).find((s) => s && !isGenericLabel(s)) ?? '';
+  const opener = openerOf(box, selectorOf);
+  return { ...(label && { label: clip(label, 80) }), ...(opener && { opener }) };
 }
 const viewportOf = () => ({ width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio, scrollX: window.scrollX, scrollY: window.scrollY });
 const sameViewport = (a: Target['viewport'], b: Target['viewport']) => a.width === b.width && a.height === b.height && a.devicePixelRatio === b.devicePixelRatio && a.scrollX === b.scrollX && a.scrollY === b.scrollY;

@@ -41,3 +41,31 @@ test('cible : fenêtre contenante facultative, libellé texte borné, absente de
     assert.equal(targetSchema.safeParse({ ...base, container: bad }).success, false, JSON.stringify(bad));
   }
 });
+
+test('cible : déclencheur de la fenêtre facultatif, rôle requis, champs bornés sur une ligne, clé restreinte, absent des charges antérieures', () => {
+  const opener = { role: 'button', name: 'Modèle détaillé', selector: '[data-socrate-id="scene-modal"] > button:nth-of-type(2)', socrateId: 'ouvrir-detail', key: 'visit:42' };
+  for (const container of [{ label: 'Visite', opener }, { opener: { role: 'button' } }]) assert.deepEqual(targetSchema.parse({ ...base, container }), { ...base, container });
+  const old = { ...base, container: { label: 'Visite' } };
+  assert.deepEqual(targetSchema.parse(old), old, 'ancien retour relu sans déclencheur injecté');
+  assert.equal(canonicalize(targetSchema.parse(old) as never), canonicalize(old as never), 'empreinte canonique inchangée');
+  const bad = [
+    {}, { ...opener, role: '' }, { ...opener, role: 'x'.repeat(65) },
+    { ...opener, name: '' }, { ...opener, name: 'x'.repeat(81) }, { ...opener, name: 'Ouvrir\nla fiche' }, { ...opener, name: 'Ouvrir\u0007' }, { ...opener, name: ' Ouvrir' },
+    { ...opener, selector: '' }, { ...opener, selector: 'x'.repeat(301) },
+    { ...opener, socrateId: 'a\tb' }, { ...opener, socrateId: 'x'.repeat(129) },
+    { ...opener, key: '' }, { ...opener, key: 'visit 42' }, { ...opener, key: 'visit"]' }, { ...opener, key: ':visit' }, { ...opener, key: 'x'.repeat(129) },
+    { ...opener, extra: 1 },
+  ];
+  for (const o of bad) assert.equal(targetSchema.safeParse({ ...base, container: { opener: o } }).success, false, JSON.stringify(o));
+  assert.equal(targetSchema.parse({ ...base, container: { opener: { ...opener, name: 'x'.repeat(79) + '…' } } }).container!.opener!.name!.length, 80);
+});
+
+test('cible : un service antérieur au déclencheur le refuse sous `target.container.opener` seulement', async () => {
+  const { issuesOf } = await import('../src/manifest.ts');
+  const { z } = await import('zod');
+  // Schéma de la version 0.5.0 : fenêtre avec libellé seul, objet strict.
+  const before = targetSchema.extend({ container: z.strictObject({ label: z.string().max(80).optional() }).optional() });
+  const r = before.safeParse({ ...base, container: { label: 'Visite', opener: { role: 'button' } } });
+  assert.equal(r.success, false);
+  assert.deepEqual(issuesOf(r.error!).map((i) => i.path), ['container.opener']);
+});

@@ -74,6 +74,11 @@ export const newThreadSchema = z.strictObject({
 export const MAX_CAPTURE_BYTES = 12 * 1024 * 1024;
 
 const finite = z.number().finite();
+/** Texte d'une ligne relevé dans la page, sans caractère de contrôle ni espace en bord. */
+const pageLine = (max: number) => z.string().min(1).max(max).regex(/^[^\p{C}]+$/u).refine((s) => s === s.trim(), 'espaces en bord de texte');
+/** Valeur de `data-socrate-opener` : lettres, chiffres, `.`, `_`, `:` et `-`, 128 caractères au plus (`visit:42`). */
+export const OPENER_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const openerKey = z.string().regex(OPENER_KEY, 'clé de déclencheur invalide');
 export const targetSchema = z.strictObject({
   url: z.string().url().max(2048),
   route: z.string().min(1).max(512),
@@ -95,7 +100,20 @@ export const targetSchema = z.strictObject({
     path: z.array(z.number().int().nonnegative().max(1000)).min(1).max(3),
   }).optional(),
   /** Fenêtre ou panneau modal qui contenait la cible (`dialog`, rôle `dialog` ou `alertdialog`, `aria-modal`), avec son libellé lisible s'il en a un ; absent hors d'une fenêtre et des charges antérieures. */
-  container: z.strictObject({ label: z.string().max(80).regex(/^[^\p{C}]*$/u).optional() }).optional(),
+  container: z.strictObject({
+    label: z.string().max(80).regex(/^[^\p{C}]*$/u).optional(),
+    /**
+     * Contrôle qui a ouvert ce conteneur, relevé hors de lui au ciblage (`aria-controls`, sinon dernière activation) ; absent des charges antérieures.
+     * `key` : valeur de `data-socrate-opener`, que l'hôte garantit stable, unique et sans effet autre que l'ouverture ; seul un contrôle qui la porte encore est cliqué au retour.
+     */
+    opener: z.strictObject({
+      role: z.string().min(1).max(64),
+      name: pageLine(80).optional(),
+      selector: z.string().min(1).max(300).optional(),
+      socrateId: pageLine(128).optional(),
+      key: openerKey.optional(),
+    }).optional(),
+  }).optional(),
 });
 export type Target = z.infer<typeof targetSchema>;
 

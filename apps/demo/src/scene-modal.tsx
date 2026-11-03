@@ -17,7 +17,7 @@ const S = {
   menu: { background: '#fff', border: '2px solid #7a4b1f', padding: 4, display: 'grid' },
 } as const;
 
-/** Scène de démonstration non adaptée à Socrate : wrappers Base UI utilisés tels quels, sans attribut ni API Socrate. */
+/** Scène de démonstration à peine adaptée à Socrate : wrappers Base UI utilisés tels quels, sans API Socrate, deux attributs facultatifs derrière le drapeau de preview. */
 export function RappelModal() {
   const [variant, setVariant] = useState<Variant>('courte');
   const [open, setOpen] = useState(false);
@@ -30,7 +30,8 @@ export function RappelModal() {
       <p>Enregistrements du modèle : <output data-testid="scene-saved">{saved}</output></p>
       <Dialog.Root open={open} onOpenChange={setOpen}>
         <Dialog.Trigger onClick={() => setVariant('courte')} data-testid="open-courte">Modèle court</Dialog.Trigger>{' '}
-        <Dialog.Trigger onClick={() => setVariant('detaillee')} data-testid="open-detaillee">Modèle détaillé</Dialog.Trigger>
+        {/* Déclencheur marqué : Socrate peut le cliquer pour rouvrir la fenêtre, puisqu'il ne fait que l'ouvrir. « Modèle court » ne l'est pas : il est seulement signalé. */}
+        <Dialog.Trigger onClick={() => setVariant('detaillee')} data-testid="open-detaillee" {...(__SOCRATE_PREVIEW__ && { 'data-socrate-opener': 'modele:detaillee' })}>Modèle détaillé</Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Backdrop style={S.backdrop} />
           <Dialog.Popup style={{ ...S.popup, width: v.width }} data-testid="scene-dialog" data-variant={variant}>

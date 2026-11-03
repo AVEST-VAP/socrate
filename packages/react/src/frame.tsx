@@ -5,10 +5,11 @@ import { ReviewClient, SocrateApiError, isStaleTargeted, ownerOf } from './clien
 import type { CaptureStatus, TabCapture } from './capture.ts';
 import { HOST_CSS, PANEL_CSS } from './styles.ts';
 import type { SocrateReviewProps } from './index.tsx';
-import { admissibleRange, afterNavigation, aimsAtSelection, cleanText, currentSelection, findTarget, inContext, isEditable, isSocrate, nearbyText, offsetOf, rectOf, roleOf, pageOf, sameOriginFrames, sameOriginRoute, screenOf, type Spot } from './locate.ts';
+import { admissibleRange, afterNavigation, rendered, aimsAtSelection, cleanText, currentSelection, findTarget, inContext, isEditable, isSocrate, nearbyText, offsetOf, rectOf, roleOf, pageOf, sameOriginFrames, sameOriginRoute, screenOf, type Spot } from './locate.ts';
 import { LIST_DEFAULT, LIST_WIDE, cluster, colorOf, hull, initialsOf, listBounds, listWidthOf, placeBeside, sideOf, type Box, type ListSide } from './layout.ts';
 import { Composer, Conversation, ConversationList, ICON, MentionClient, Notice, SEND_HINT, TARGETED_LABELS, changeState, describeCapture, describeThread, forMe, threadActions, useSubmission, type Review, type ThreadAction } from './conversation.tsx';
 import { Tip } from './tip.tsx';
+import { recordActivations } from './activation.ts';
 import type { Status } from './panel.tsx';
 
 // Surfaces éditoriales historiques : chargées seulement quand l'hôte passe `editorial`.
@@ -138,6 +139,26 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   const [held, setHeld] = useState(false);
   // Raccourci à caractère unique, désactivable pour la session (WCAG 2.1.4).
   const [shortcut, setShortcut] = useState(true);
+  // Dernières activations de l'hôte, lues au ciblage pour relever le déclencheur d'une fenêtre.
+  useEffect(recordActivations, []);
+  /**
+   * Génération de l'opération « Voir sur la page » en cours, invalidée par un nouveau retour, « Tout fermer », la fermeture de la liste ou de la vue,
+   * une navigation qui n'est pas la sienne (`going`) et le démontage : aucune continuation invalidée ne clique, ne pose de repère ni n'ouvre de fil.
+   */
+  const operation = useRef(0);
+  const going = useRef<string | null>(null);
+  /** Repère posé sur le déclencheur d'une fenêtre fermée et sa consigne : il vit exactement aussi longtemps qu'elle. */
+  const unmark = useRef<(() => void) | null>(null);
+  const markHint = useRef<string | null>(null);
+  const clearMark = () => {
+    unmark.current?.();
+    unmark.current = null;
+    markHint.current = null;
+  };
+  const abandon = () => {
+    operation.current += 1;
+    clearMark();
+  };
 
   // Données partagées.
   const session = useSyncExternalStore(client.subscribe, () => client.currentSession, () => null);
@@ -167,7 +188,10 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   // Écran courant relu à chaque rendu ; l'API Navigation (pushState compris) et popstate déclenchent ce rendu.
   const [routeTick, setRouteTick] = useState(0);
   useEffect(() => {
-    const bump = () => setRouteTick((n) => n + 1);
+    const bump = () => {
+      if (going.current !== location.pathname + location.search + location.hash && going.current !== location.pathname) abandon();
+      setRouteTick((n) => n + 1);
+    };
     const platform = (window as Window & { navigation?: EventTarget }).navigation;
     platform?.addEventListener('currententrychange', bump);
     window.addEventListener('popstate', bump);
@@ -267,6 +291,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   };
 
   const startTargeting = async (retarget = false) => {
+    clearMark();
     setMenu(null);
     setMoreOpen(false);
     setNote(null);
@@ -282,6 +307,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
 
   /** La plage est revalidée après la permission : une sélection changée entre-temps n'est jamais remplacée par une autre. */
   const startCorrection = async (range: Range, frame: HTMLIFrameElement | null) => {
+    clearMark();
     setMenu(null);
     setMoreOpen(false);
     setNote(null);
@@ -486,49 +512,84 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   /** Une ligne ouvre toujours son fil dans la liste, que la cible soit localisée ou non ; « Voir sur la page » passe par `goTo`. */
   const openThread = (threadId: string) => setExpanded((e) => (e === threadId ? null : threadId));
   const closeList = () => {
+    abandon();
     setListOpen(false);
     setAside(null);
     focusControl('launcher');
   };
 
+  useEffect(() => abandon, [client]);
+  // Consigne effacée ou remplacée (note sous la toolbar ou consigne du fil) : son repère disparaît avec elle.
+  useEffect(() => {
+    if (markHint.current && note !== markHint.current && missed?.hint !== markHint.current) clearMark();
+  }, [note, missed]);
+  /** Cible retrouvée : défilement jusqu'à elle et bulle du fil ; écran large, la liste reste ouverte mais la ligne se replie, pour un seul composeur du fil. */
+  const land = (threadId: string, spot: Spot) => {
+    setMissed(null);
+    setNote(null);
+    setAside(null);
+    if (wide) setExpanded(null);
+    else setListOpen(false);
+    spot.element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const box = rectOf(spot);
+    opener.current = null;
+    setBubble({ kind: 'thread', threadId, at: box ? boxOf(box) : CENTER() });
+  };
+
   /**
    * « Voir sur la page » et « Aller à la page » : navigation explicite de l'hôte vers la page enregistrée, même origine seulement, sauf si elle est déjà affichée :
-   * URL complète (chemin, requête, fragment) pour le document principal, route de l'hôte pour une iframe. Aucun clic n'est rejoué.
-   * La cible est ensuite localisée par la même règle que les pastilles ; absente ou ambiguë, le fil reste lisible dans la liste, avec la consigne d'ouvrir son conteneur s'il en avait un. Rend vrai si elle est retrouvée.
+   * URL complète (chemin, requête, fragment) pour le document principal, route de l'hôte pour une iframe.
+   * La cible est ensuite localisée par la même règle que les pastilles. Absente, dans une fenêtre dont le déclencheur est retrouvé :
+   * marqué `data-socrate-opener` par l'hôte, il est cliqué puis la cible attendue ; sinon il est seulement signalé, jamais cliqué, et son activation par la personne ouvre le fil.
+   * Toujours absente ou ambiguë, le fil reste lisible dans la liste, avec la consigne rendue (`hint`).
    */
-  const goTo = async (threadId: string) => {
+  const goTo = async (threadId: string): Promise<{ found: boolean; hint: string | null }> => {
+    const lost = { found: false, hint: null };
+    const gen = ++operation.current;
+    clearMark();
     const t = threads.find((x) => x.threadId === threadId);
     const screen = t?.target ? screenOf(t.target) : null;
-    if (!t || !screen || !sameOriginRoute(screen)) return false;
+    if (!t || !screen || !sameOriginRoute(screen)) return lost;
     setMenu(null);
     setMissed(null);
     const page = pageOf(t.target!);
     // Valeur finale vérifiée : jamais une adresse protocolaire relative (`//hôte/…`) passée à l'adaptateur.
-    if (!page || !sameOriginRoute(page)) return false;
+    if (!page || !sameOriginRoute(page)) return lost;
+    going.current = page;
     if (page !== (t.target!.frame?.length ? location.pathname : location.pathname + location.search + location.hash)) navigation.go(page);
-    const alive = { get alive() { return owner.current === client; } };
-    const r = await afterNavigation(alive, () => {
+    const alive = { get alive() { return owner.current === client && operation.current === gen; } };
+    // Une cible présente mais non rendue (fenêtre fermée restée montée, `hidden`, `inert`) n'est pas retrouvée.
+    const locate = () => afterNavigation(alive, () => {
       const spot = spotOf(t);
-      return spot ? { kind: 'found' as const, spot } : { kind: 'missing' as const };
+      return spot && rendered(spot.element, spot.frame) ? { kind: 'found' as const, spot } : { kind: 'missing' as const };
     }, 120);
-    if (!alive.alive) return false;
-    if (r.kind === 'missing') {
-      const hint = t.target!.container ? (await import('./container.ts')).openContainerHint(t.target!) : null;
-      if (!alive.alive) return false;
-      setListOpen(true);
-      setExpanded(threadId);
-      setMissed(hint ? { threadId, hint } : null);
-      return false;
+    let r = await locate();
+    if (!alive.alive) return lost;
+    let hint: string | null = null;
+    let signalled = false;
+    if (r.kind === 'missing' && t.target!.container) {
+      const way = await (await import('./opener.ts')).reopen(t.target!, () => alive.alive, locate, (s) => { if (s.kind === 'found' && alive.alive) land(threadId, s.spot); });
+      if (!alive.alive) { way.stop?.(); return lost; }
+      r = way.r ?? r;
+      hint = way.hint;
+      unmark.current = way.stop;
+      markHint.current = way.stop && hint;
+      signalled = !!way.stop;
     }
-    setAside(null);
-    // Écran large : la liste reste ouverte mais la ligne se replie, pour un seul composeur du fil.
-    if (wide) setExpanded(null);
-    else setListOpen(false);
-    r.spot.element.scrollIntoView({ block: 'center', inline: 'nearest' });
-    const box = rectOf(r.spot);
-    opener.current = null;
-    setBubble({ kind: 'thread', threadId, at: box ? boxOf(box) : CENTER() });
-    return true;
+    if (r.kind === 'missing') {
+      // Écran étroit avec repère : la page reste visible, la consigne passe sous la toolbar.
+      if (signalled && !wide) {
+        setListOpen(false);
+        setNote(hint);
+      } else {
+        setListOpen(true);
+        setExpanded(threadId);
+        setMissed(hint ? { threadId, hint } : null);
+      }
+      return { found: false, hint };
+    }
+    land(threadId, r.spot);
+    return { found: true, hint: null };
   };
 
   /** Action d'un fil depuis le menu de sa pastille ; mêmes entrées que sa ligne et ses boutons. */
@@ -589,6 +650,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     const p = targeted.view.phase;
     const inFlight = p.kind === 'sending' || p.kind === 'uncertain' || p.kind === 'identity-blocked' ? p.intent.payload : null;
     captureRef.current?.release(inFlight?.kind === 'targeted' ? inFlight.source : null);
+    abandon();
     setMenu(null);
     setMoreOpen(false);
     setListOpen(false);
@@ -786,7 +848,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     actions.current = (action, control, event) => {
       if (control.getAttribute('aria-disabled') === 'true') return;
       if (action === 'target') void startTargeting(control.dataset.retarget === 'true');
-      else if (action === 'launcher') { setMoreOpen(false); setAside(null); setListOpen((o) => !o); }
+      else if (action === 'launcher') { setMoreOpen(false); setAside(null); if (listOpen) abandon(); setListOpen(!listOpen); }
       else if (action === 'own') openTriage(null, control);
       else if (action === 'agents') { setMoreOpen(false); setAside('agents'); setListOpen(true); }
       else if (action === 'more') setMoreOpen((o) => !o);
@@ -800,7 +862,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
       else if (action === 'correct' && menu?.kind === 'correction') void startCorrection(menu.range, menu.frame);
       else if (action === 'thread' && menu?.kind === 'thread') runThreadAction(control.dataset.thread as ThreadAction, menu.threadIds, boxOf(menu.restore?.getBoundingClientRect() ?? CENTER()));
       else if (action === 'shortcut') setShortcut((on) => !on);
-      else if (action === 'note') setNote(null);
+      else if (action === 'note') { setNote(null); clearMark(); }
       else if (action === 'reload') void load();
       else if (action === 'draft') setBubble({ kind: 'draft', mode: mode.current, at: shot ? boxOf(shot.target.rect) : CENTER() });
       else if (action === 'pin') {
@@ -876,6 +938,7 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     setTriage({ threadId, own: !!from, closeList: !!from && !listOpen });
   };
   const closeTriage = () => {
+    abandon();
     if (triage?.closeList) setListOpen(false);
     setTriage(null);
   };
@@ -888,9 +951,10 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
   /** « Voir sur la page » de la vue : elle se ferme, puis comme dans la liste ; cible absente, consigne d'ouvrir son conteneur sous la toolbar, l'écran étroit rendant la page visible. */
   const showInPreview = async (threadId: string, hint: string) => {
     setTriage(null);
-    if (await goTo(threadId)) return;
+    const r = await goTo(threadId);
+    if (r.found) return;
     setMissed(null);
-    setNote(hint);
+    setNote(r.hint ?? hint);
     if (!wide) setListOpen(false);
   };
   const openCount = threads.filter((t) => t.state === 'open').length;

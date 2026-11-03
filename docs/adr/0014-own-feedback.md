@@ -16,7 +16,7 @@ A reviewer leaves feedback, often inside dialogs and drawers, and comes back the
 ## Limits
 
 - A resolution from the panel writes no message and records no author: it moves the thread up the list as "Résolu" without a name.
-- A dialog opened by a click on local state cannot be reopened. Socrate says which one to open.
+- A dialog opened by a click on local state cannot be reopened. Socrate says which one to open. ADR 0015 adds the control that opened it.
 - The full URL may carry a one-off query (a tracking parameter, a token). It is replayed as recorded, on the same origin only, as the reviewer saw it.
 
 ## Rejected alternatives
