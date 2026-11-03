@@ -1,27 +1,33 @@
 import type { Target } from '@socrate/contract';
 import { openContainerHint, openerName } from './container.ts';
-import { docOf, isSocrate, resolveEditorial, resolveSelector, roleOf, type Resolution } from './locate.ts';
+import { docOf, isSocrate, rendered, resolveEditorial, resolveSelector, roleOf, type Resolution } from './locate.ts';
 
 // Chargé par « Voir sur la page » seulement, quand la cible d'une fenêtre est absente.
 
-const shown = (el: Element) => el.getClientRects().length > 0 && el.checkVisibility({ visibilityProperty: true });
-const unique = (r: Resolution) => (r.kind === 'found' && !isSocrate(r.element) && shown(r.element) ? r.element : null);
+const unique = (r: Resolution) => (r.kind === 'found' && !isSocrate(r.element) ? r.element : null);
 
 /**
  * Déclencheur enregistré retrouvé sur la page de la cible : clé `data-socrate-opener`, puis identifiant éditorial, puis sélecteur
- * dont l'élément garde le rôle et le nom accessible enregistrés ; chaque fois une seule correspondance, rendue. `marked` : il porte encore la clé enregistrée.
+ * dont l'élément garde le rôle et le nom accessible enregistrés ; chaque fois une seule correspondance.
+ * `reachable` : rendu, hors `inert`, dans une iframe elle-même rendue et de même origine. `clickable` : de plus marqué de la clé enregistrée et activable (ni `:disabled` ni `aria-disabled`).
  */
-function findOpener(t: Target): { element: HTMLElement; marked: boolean } | null {
+function findOpener(t: Target): { element: HTMLElement; reachable: boolean; clickable: boolean } | null {
   const o = t.container?.opener;
-  const doc = o && docOf(t)?.doc;
-  if (!o || !doc) return null;
+  const at = o && docOf(t);
+  if (!o || !at) return null;
+  const { doc, frame } = at;
   let el = o.key ? unique(resolveSelector(doc, `[data-socrate-opener="${CSS.escape(o.key)}"]`)) : null;
   if (!el && o.socrateId) el = unique(resolveEditorial(doc, { id: o.socrateId }));
   if (!el && o.selector && o.name) {
     const r = unique(resolveSelector(doc, o.selector));
     el = r && roleOf(r) === o.role && openerName(r) === o.name ? r : null;
   }
-  return el && { element: el, marked: !!o.key && el.getAttribute('data-socrate-opener') === o.key };
+  if (!el) return null;
+  let sameOrigin = !frame;
+  try { sameOrigin ||= frame!.contentWindow!.location.origin === location.origin; } catch { /* autre origine */ }
+  const reachable = sameOrigin && rendered(el, frame);
+  const clickable = reachable && !!o.key && el.getAttribute('data-socrate-opener') === o.key && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]');
+  return { element: el, reachable, clickable };
 }
 
 /** Consigne posée avec le repère du déclencheur. */
@@ -66,17 +72,22 @@ function markOpener(el: HTMLElement, onActivate: () => void): () => void {
 }
 
 /**
- * Chemin vers la fenêtre fermée d'une cible absente. Déclencheur marqué : cliqué, puis la cible attendue par `locate`.
- * Non marqué : signalé (`stop` le libère) ; quand la personne l'active et que la cible apparaît, `onFound` la reçoit.
- * Introuvable, ou cible toujours absente après le clic : la consigne d'ouverture de la fenêtre.
+ * Chemin vers la fenêtre fermée d'une cible absente. Déclencheur marqué et activable : cliqué, puis la cible attendue par `locate`.
+ * Atteignable sans être cliquable : signalé (`stop` le libère) ; quand la personne l'active et que la cible apparaît, `onFound` la reçoit.
+ * Introuvable, inatteignable, ou cible toujours absente après le clic : la consigne d'ouverture de la fenêtre.
+ * `alive` faux (opération abandonnée) : ni clic, ni repère, ni continuation.
  */
-export async function reopen<R extends { kind: string }>(t: Target, locate: () => Promise<R>, onFound: (r: R) => void): Promise<{ r: R | null; hint: string | null; stop: (() => void) | null }> {
-  const found = findOpener(t);
-  if (found?.marked) {
+export async function reopen<R extends { kind: string }>(t: Target, alive: () => boolean, locate: () => Promise<R>, onFound: (r: R) => void): Promise<{ r: R | null; hint: string | null; stop: (() => void) | null }> {
+  const found = alive() ? findOpener(t) : null;
+  if (!alive()) return { r: null, hint: null, stop: null };
+  if (found?.clickable) {
     found.element.click();
     const r = await locate();
     return { r, hint: r.kind === 'found' ? null : openContainerHint(t), stop: null };
   }
-  if (!found) return { r: null, hint: openContainerHint(t), stop: null };
-  return { r: null, hint: openerHint(t), stop: markOpener(found.element, () => void locate().then((r) => { if (r.kind === 'found') onFound(r); })) };
+  if (!found?.reachable) return { r: null, hint: openContainerHint(t), stop: null };
+  return {
+    r: null, hint: openerHint(t),
+    stop: markOpener(found.element, () => { if (alive()) void locate().then((r) => { if (r.kind === 'found' && alive()) onFound(r); }); }),
+  };
 }

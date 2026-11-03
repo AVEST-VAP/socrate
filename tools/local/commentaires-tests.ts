@@ -3063,6 +3063,139 @@ test('chemin vers la modale : déclencheur relevé au ciblage, rouvert par clic 
   } finally { await ctx.context.close(); }
 });
 
+test('chemin vers la modale, fenêtre restée montée : cible cachée non retrouvée, clic seulement sur un déclencheur activable, nom sans saisie de la personne', async () => {
+  const ctx = await browser.newContext(origins());
+  try {
+    const page = await loginAs(ctx, 'Claire Morel, relectrice produit', '/reglages/rappels');
+    await toolbarReady(page);
+    // Panneau de l'hôte monté en permanence, ouvert et fermé par `hidden` ; son déclencheur marqué porte un menu fictif dont l'option n'entre pas dans le nom.
+    await page.evaluate(() => {
+      const wrap = document.createElement('section');
+      wrap.dataset.testid = 'monte';
+      wrap.innerHTML = '<button type="button" data-socrate-opener="test:monte" aria-controls="panneau-monte">Ouvrir le panneau <select><option>Mme Fictive Secrète</option></select></button>'
+        + '<div role="dialog" id="panneau-monte" aria-label="Panneau monté" hidden><p data-testid="cible-monte">Contenu fictif du panneau monté, toujours dans le DOM.</p></div>'
+        + '<p><span id="etiquette-nom">Ouvrir l’étiquette</span> <textarea id="etiquette-note">Mot de passe fictif</textarea> <span id="etiquette-saisie" contenteditable="true" style="display:inline-block;min-width:4em"></span>'
+        + ' <button type="button" aria-labelledby="etiquette-nom etiquette-note etiquette-saisie" aria-controls="panneau-etiquette">?</button></p>'
+        + '<div role="dialog" id="panneau-etiquette" aria-label="Étiquette" hidden><p data-testid="cible-etiquette">Contenu fictif de l’étiquette, assez long.</p></div>';
+      for (const b of wrap.querySelectorAll('button')) b.addEventListener('click', (e) => { if (!(e.target as Element).closest('select')) document.getElementById(b.getAttribute('aria-controls')!)!.hidden = false; });
+      document.body.prepend(wrap);
+    });
+    const panel = page.locator('#panneau-monte');
+    const trigger = page.locator('[data-socrate-opener="test:monte"]');
+    await trigger.click({ position: { x: 6, y: 6 } });
+    await panel.waitFor();
+    const id = await comment(page, page.getByTestId('cible-monte'), 'Chemin : retour dans le panneau monté.');
+    const opener = (await targetOf(id)).container.opener;
+    assert.deepEqual({ name: opener.name, key: opener.key, role: opener.role }, { name: 'Ouvrir le panneau', key: 'test:monte', role: 'button' }, 'option du menu exclue du nom');
+
+    // Saisie fictive sensible dans une zone éditable référencée par aria-labelledby, et texte d'un champ : hors du nom et de l'envoi.
+    await page.locator('#etiquette-saisie').click();
+    await page.keyboard.type('Code fictif 4242');
+    await page.locator('[aria-controls="panneau-etiquette"]').click();
+    await page.getByTestId('cible-etiquette').waitFor();
+    const etiquette = await comment(page, page.getByTestId('cible-etiquette'), 'Chemin : retour dans l’étiquette.');
+    assert.equal((await targetOf(etiquette)).container.opener.name, 'Ouvrir l’étiquette');
+    const sent = toService(ctx, (r) => r.method === 'POST' && path(r).endsWith('/targeted')).map((r) => JSON.stringify(JSON.parse(r.postData!).target.container)).join('\n');
+    for (const secret of ['Mme Fictive Secrète', 'Mot de passe fictif', 'Code fictif 4242']) assert.ok(!sent.includes(secret), `« ${secret} » jamais envoyé`);
+
+    // Fenêtre fermée mais montée : la cible présente et cachée n'est pas retrouvée, le déclencheur marqué la rouvre.
+    const hide = () => panel.evaluate((el: HTMLElement) => { el.hidden = true; });
+    const show = async () => {
+      if (!(await page.locator('#socrate-frame').isVisible())) await control(page, 'launcher').click();
+      await row(page, id).getByRole('button', { name: 'Voir sur la page' }).click();
+    };
+    const conversation = bubble(page).locator(`[data-testid="socrate-conversation"][data-thread="${id}"]`);
+    await hide();
+    await show();
+    await conversation.waitFor({ timeout: 10_000 });
+    assert.equal(await panel.isVisible(), true, 'déclencheur marqué cliqué');
+    await page.keyboard.press('Escape');
+    await page.locator('#socrate-bubble').waitFor({ state: 'hidden' });
+
+    // Déclencheur inactif : jamais cliqué. Désactivé ou aria-disabled : repère ; sous un ancêtre inert : consigne de fenêtre seule.
+    const mark = page.locator('[data-socrate="opener"]');
+    const hint = row(page, id).getByTestId('socrate-goto-hint');
+    for (const [why, on, off] of [
+      ['disabled', (b: HTMLElement) => b.setAttribute('disabled', ''), (b: HTMLElement) => b.removeAttribute('disabled')],
+      ['aria-disabled', (b: HTMLElement) => b.setAttribute('aria-disabled', 'true'), (b: HTMLElement) => b.removeAttribute('aria-disabled')],
+    ] as const) {
+      await hide();
+      await trigger.evaluate(on);
+      await show();
+      await hint.getByText('Ouvrez « Ouvrir le panneau » pour retrouver l’élément.').waitFor({ timeout: 10_000 });
+      await mark.waitFor();
+      await page.waitForTimeout(300);
+      assert.equal(await panel.isVisible(), false, `${why} : aucun clic`);
+      await trigger.evaluate(off);
+    }
+    await hide();
+    await page.getByTestId('monte').evaluate((el) => el.setAttribute('inert', ''));
+    await show();
+    await hint.getByText('C’était dans la fenêtre « Panneau monté ». Ouvrez-la pour retrouver l’élément.').waitFor({ timeout: 10_000 });
+    await page.waitForTimeout(300);
+    assert.equal(await mark.count(), 0, 'inert : aucun repère');
+    assert.equal(await panel.isVisible(), false, 'inert : aucun clic');
+    assert.deepEqual(ctx.blocked, []);
+  } finally { await ctx.context.close(); }
+});
+
+test('chemin vers la modale, opération abandonnée et repère lié à sa consigne : aucun clic ni fil après « Tout fermer », repère retiré par Commenter', async () => {
+  const ctx = await browser.newContext(origins());
+  try {
+    const page = await loginAs(ctx, 'Claire Morel, relectrice produit', '/reglages/rappels');
+    await toolbarReady(page);
+    const dialog = page.getByTestId('scene-dialog');
+    await page.getByTestId('open-detaillee').click();
+    const marked = await comment(page, page.getByTestId('scene-intro'), 'Abandon : retour dans le modèle détaillé.');
+    await dialog.getByRole('button', { name: 'Fermer' }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.getByTestId('open-courte').click();
+    const plain = await comment(page, page.getByTestId('scene-intro'), 'Abandon : retour dans le modèle court.');
+    await dialog.getByRole('button', { name: 'Fermer' }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.reload();
+    await toolbarReady(page);
+
+    // Chunk du retour retenu : « Tout fermer » arrive avant lui ; à sa livraison, aucun clic, aucune bulle.
+    let release!: () => void;
+    const held = new Promise<void>((ok) => { release = ok; });
+    ctx.setFaults((r) => (/\/assets\/opener-[^/]+\.js$/.test(path(r)) ? { kind: 'hold', until: held } : { kind: 'pass' }));
+    await control(page, 'launcher').click();
+    await row(page, marked).getByRole('button', { name: 'Traiter ce retour' }).click();
+    await list(page).getByTestId('socrate-triage-show').click();
+    await page.waitForTimeout(500);
+    await control(page, 'close').click();
+    release();
+    ctx.setFaults(null);
+    await page.waitForTimeout(2500);
+    assert.equal(await dialog.isVisible(), false, 'aucun clic après abandon');
+    assert.equal(await page.locator('#socrate-bubble').isVisible(), false, 'aucune bulle après abandon');
+    assert.equal(await page.locator('[data-socrate="opener"]').count(), 0);
+
+    // Repère d'un déclencheur non marqué : retiré dès que la personne lance « Commenter ».
+    await control(page, 'launcher').click();
+    await row(page, plain).getByRole('button', { name: 'Traiter ce retour' }).click();
+    await list(page).getByTestId('socrate-triage-show').click();
+    const mark = page.locator('[data-socrate="opener"]');
+    await mark.waitFor({ timeout: 10_000 });
+    await control(page, 'target').first().click();
+    await mark.waitFor({ state: 'detached' });
+    await page.keyboard.press('Escape');
+    // Fermeture de la liste : le repère suivant disparaît aussi, et l'ouverture par la personne n'ouvre plus le fil.
+    if (!(await page.locator('#socrate-frame').isVisible())) await control(page, 'launcher').click();
+    await row(page, plain).getByRole('button', { name: 'Traiter ce retour' }).click();
+    await list(page).getByTestId('socrate-triage-show').click();
+    await mark.waitFor({ timeout: 10_000 });
+    await control(page, 'launcher').click();
+    await mark.waitFor({ state: 'detached' });
+    await page.getByTestId('open-courte').click();
+    await page.getByTestId('scene-intro').waitFor();
+    await page.waitForTimeout(2500);
+    assert.equal(await page.locator('#socrate-bubble').isVisible(), false, 'aucun fil ouvert par une opération abandonnée');
+    assert.deepEqual(ctx.blocked, []);
+  } finally { await ctx.context.close(); }
+});
+
 test('chemin vers la modale, service antérieur au déclencheur : refus 422 sous `target.container.opener`, même charge sans lui, fenêtre et libellé gardés', async () => {
   const ctx = await browser.newContext(origins());
   try {
@@ -3083,6 +3216,27 @@ test('chemin vers la modale, service antérieur au déclencheur : refus 422 sous
     const keys = toService(ctx, (r) => r.method === 'POST' && path(r).endsWith('/targeted')).map((r) => r.headers['idempotency-key']);
     assert.equal(new Set(keys).size, 1, 'même clé d’idempotence');
     assert.deepEqual((await targetOf(id)).container, { label: 'Modèle de rappel détaillé' });
+
+    // Tout autre 422 (champ du déclencheur invalide, autre code, issues vides) remonte tel quel, sans renvoi.
+    for (const [why, body] of [
+      ['champ invalide', { code: 'invalid_request', issues: [{ path: 'target.container.opener.name', message: 'texte invalide' }] }],
+      ['autre code', { code: 'invalid_manifest', issues: [{ path: 'target.container.opener', message: 'donnée inconnue refusée' }] }],
+      ['issues vides', { code: 'invalid_request', issues: [] }],
+    ] as const) {
+      const text = `Chemin : refus ${why} remonté.`;
+      const seen = toService(ctx, (r) => r.method === 'POST' && path(r).endsWith('/targeted')).length;
+      ctx.setFaults((r) => (r.method === 'POST' && path(r).endsWith('/targeted') ? { kind: 'respond', status: 422, body: { message: 'retour ciblé invalide', requestId: 'banc', retryable: false, ...body } } : { kind: 'pass' }));
+      await targetElement(page, page.getByTestId('scene-intro'));
+      await bubble(page).getByRole('textbox', { name: 'Votre commentaire' }).fill(text);
+      await send(page);
+      await bubble(page).getByText(/retour ciblé invalide/).waitFor({ timeout: 10_000 });
+      ctx.setFaults(null);
+      assert.equal(toService(ctx, (r) => r.method === 'POST' && path(r).endsWith('/targeted')).length - seen, 1, `${why} : un seul envoi`);
+      assert.equal(await countBody(text), 0, `${why} : rien publié`);
+      await bubble(page).getByRole('textbox', { name: 'Votre commentaire' }).fill('');
+      await page.keyboard.press('Escape');
+      await page.locator('#socrate-bubble').waitFor({ state: 'hidden' });
+    }
     assert.deepEqual(ctx.blocked, []);
   } finally { await ctx.context.close(); }
 });

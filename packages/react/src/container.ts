@@ -36,10 +36,26 @@ type Opener = NonNullable<NonNullable<Target['container']>['opener']>;
 /** Même règle que `OPENER_KEY` du contrat, recopiée pour ne pas tirer zod dans ce chunk. */
 const OPENER_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-/** Nom accessible simplifié d'un déclencheur : `aria-labelledby`, `aria-label`, texte, `title`, le premier non vide, sans lecture du rendu ; 80 unités au plus. */
+/** Champs et contenus éditables : ce que la personne y a saisi n'entre jamais dans un nom relevé. */
+const FIELD = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+/** Texte d'un élément hors champs et contenus éditables, vide pour un élément éditable lui-même. */
+function readable(el: Element | null): string {
+  if (!el || el.matches(FIELD) || (el as HTMLElement).isContentEditable) return '';
+  const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.nodeType === Node.TEXT_NODE ? NodeFilter.FILTER_ACCEPT : (n as Element).matches(FIELD) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP),
+  });
+  let text = '';
+  while (walker.nextNode()) text += walker.currentNode.nodeValue;
+  return text;
+}
+
+/**
+ * Nom accessible simplifié d'un déclencheur : `aria-labelledby` (éléments référencés non éditables), `aria-label`, texte hors champs et contenus éditables, `title` ;
+ * le premier non vide, sans lecture du rendu ; 80 unités au plus.
+ */
 export function openerName(el: Element): string {
-  const by = el.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
-  return clip([by, el.getAttribute('aria-label'), el.textContent, el.getAttribute('title')].map((s) => oneLine(s ?? '')).find(Boolean) ?? '', 80);
+  const by = el.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => readable(el.ownerDocument.getElementById(id))).join(' ');
+  return clip([by, el.getAttribute('aria-label'), readable(el), el.getAttribute('title')].map((s) => oneLine(s ?? '')).find(Boolean) ?? '', 80);
 }
 
 /**

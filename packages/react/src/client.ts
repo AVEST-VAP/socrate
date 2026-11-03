@@ -333,6 +333,14 @@ export class Submission {
   }
 }
 
+/** Message de `issuesOf` (contrat) pour une clé inconnue d'un objet strict, recopié pour ne pas tirer zod dans ce chunk. */
+const UNKNOWN_KEY = 'donnée inconnue refusée';
+/**
+ * Refus d'un service antérieur au déclencheur : `invalid_request`, au moins une issue, et chacune exactement le rejet de la clé inconnue `opener`
+ * de `target.container` (`unrecognized_keys` rendu par le Worker sous `target.container.opener`).
+ */
+export const refusesOpener = (e: ApiError | null) => e?.code === 'invalid_request' && !!e.issues?.length && e.issues.every((i) => i.path === 'target.container.opener' && i.message === UNKNOWN_KEY);
+
 export class ReviewClient {
   readonly preview: PreviewContext;
   private readonly getAssertion: (signal: AbortSignal) => Promise<string>;
@@ -526,17 +534,19 @@ export class ReviewClient {
     }
     const pieces = p.attachments.length ? { attachments: p.attachments.map((a) => a.meta) } : {};
     const reserve = (target: Target) => this.transport('POST', `${this.base()}/targeted`, { kind: 'targeted', body: messageOf(p), target, image: p.image, ...(p.proposal && { proposal: p.proposal }), ...pieces }, { ...auth, 'Idempotency-Key': intent.key });
-    // Refus de validation portant seulement sur `under` : refusé avant toute écriture, la même clé reprend la charge allégée sans conflit.
-    const refused = async (r: Response, under: string) => r.status === 422 && !!((await r.clone().json().catch(() => null)) as ApiError | null)?.issues?.every((i) => i.path.startsWith(under));
+    const refusal = async (r: Response) => (r.status === 422 ? ((await r.clone().json().catch(() => null)) as ApiError | null) : null);
     let target = p.target;
     let reserved = await reserve(target);
-    // Service antérieur au déclencheur (`container.opener`) : la fenêtre et son libellé sont gardés, seul le déclencheur est retiré.
-    if (target.container?.opener && await refused(reserved, 'target.container.opener')) {
+    // Refusé avant toute écriture : la même clé reprend la charge allégée sans conflit.
+    // Service antérieur au déclencheur : seul le rejet exact du champ inconnu `opener` le retire, fenêtre et libellé gardés ; tout autre refus remonte tel quel.
+    if (target.container?.opener && refusesOpener(await refusal(reserved))) {
       const { opener: _, ...container } = target.container;
       reserved = await reserve(target = { ...target, container });
     }
-    // Service antérieur au champ `container`, ou relevé refusé : la même charge sans lui.
-    if (target.container && await refused(reserved, 'target.container')) {
+    // Service antérieur au champ `container`, ou libellé refusé : la même charge sans lui, jamais pour un refus du déclencheur.
+    const refused = await refusal(reserved);
+    const issues = refused?.code === 'invalid_request' ? refused.issues : undefined;
+    if (target.container && issues?.length && issues.every((i) => i.path.startsWith('target.container') && !i.path.startsWith('target.container.opener'))) {
       const { container: _, ...rest } = target;
       reserved = await reserve(rest);
     }

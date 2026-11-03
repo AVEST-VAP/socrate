@@ -273,6 +273,12 @@ function byText(doc: Document, t: Target): Element | null {
   return hit && hit.getClientRects().length > 0 && hit.checkVisibility({ visibilityProperty: true }) ? hit : null;
 }
 
+/** Élément réellement rendu et atteignable : boîte non nulle, visible (`display`, `visibility`, `hidden` compris), hors `inert` ; son iframe de même. */
+export const rendered = (el: Element, frame?: HTMLIFrameElement | null): boolean => {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && el.checkVisibility({ visibilityProperty: true }) && !el.closest('[inert]') && (!frame || rendered(frame));
+};
+
 /** Document de la cible sur cet écran : l'onglet, ou l'iframe unique de même origine désignée par le chemin de frame, sur la route enregistrée ; sinon null. */
 export function docOf(t: Target): { doc: Document; frame: HTMLIFrameElement | null } | null {
   let frame: HTMLIFrameElement | null = null;
