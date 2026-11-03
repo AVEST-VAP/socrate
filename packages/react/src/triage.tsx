@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ThreadWithMessages } from '@socrate/contract';
+import { lastActivity, ownThreads, replyTo, type ThreadWithMessages } from '@socrate/contract';
 import type { ReviewClient } from './client.ts';
 import { Avatar, Conversation, HandoffTag, ICON, canChangeState, changeState, excerptOf, forMe, handoffIn, toVerify, type Review } from './conversation.tsx';
 import { containerLabel, openContainerHint } from './container.ts';
@@ -16,7 +16,8 @@ const TRIAGE_CSS = `
 .socrate-triage-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr) minmax(280px, 380px); }
 .socrate-triage-main[data-done] { grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); }
 .socrate-triage-queue { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid #e4e4e7; }
-.socrate-triage-queue .socrate-filter { margin: 8px; align-self: flex-start; }
+.socrate-triage-queue .socrate-filter { margin: 8px; align-self: flex-start; flex-wrap: wrap; }
+.socrate-triage-queue .socrate-filter button { white-space: nowrap; }
 .socrate-triage-queue ol { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; list-style: none; margin: 0; padding: 0 8px 8px; }
 .socrate-triage-queue button.socrate-row[aria-current="true"] { background: #eff6ff; box-shadow: inset 2px 0 0 #2563eb; }
 .socrate-triage-queue li[data-state="resolved"] .socrate-row { opacity: .65; }
@@ -54,8 +55,23 @@ button.socrate-triage-shot[data-zoom="target"] { cursor: zoom-out; }
 }
 `;
 
-type Filter = 'open' | 'resolved' | 'mine' | 'agent' | 'verify';
-const FILTER_NAMES: Record<Filter, string> = { open: 'Ouvertes', resolved: 'Résolues', mine: 'Pour moi', agent: 'Pour mon agent', verify: 'À vérifier' };
+type Filter = 'open' | 'resolved' | 'mine' | 'agent' | 'verify' | 'own';
+const FILTER_NAMES: Record<Filter, string> = { open: 'Ouvertes', resolved: 'Résolues', mine: 'Pour moi', agent: 'Pour mon agent', verify: 'À vérifier', own: 'Mes retours' };
+
+/** « hier 17 h », « aujourd’hui 9 h 05 », « 27 oct. 17 h ». */
+function when(iso: string) {
+  const d = new Date(iso);
+  const day = (offset: number) => { const x = new Date(); x.setDate(x.getDate() - offset); return x.toDateString() === d.toDateString(); };
+  const time = d.toLocaleTimeString('fr-FR', { timeStyle: 'short' }).replace(/:00$/, ' h').replace(':', ' h ');
+  return `${day(0) ? 'aujourd’hui' : day(1) ? 'hier' : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} ${time}`;
+}
+/** Dernière réponse reçue sur un retour de la personne : d'une personne ou d'un agent, résolution comprise ; une résolution sans message ne dit pas qui. */
+function replyLine(t: ThreadWithMessages, me: string) {
+  const m = replyTo(t.messages, me);
+  if (!m) return t.state === 'resolved' ? `Résolu · ${when(lastActivity(t))}` : 'En attente de réponse';
+  const who = m.via ?? m.author.displayName;
+  return `${!m.transition ? `Réponse de ${who}` : `${m.transition.state === 'resolved' ? 'Résolu' : 'Rouvert'} par ${who}`} · ${when(m.createdAt)}`;
+}
 type Shown = { kind: 'loading' } | { kind: 'ready'; bitmap: ImageBitmap } | { kind: 'failed'; why: string };
 type Entry = { shown: Shown; live: boolean };
 
@@ -133,14 +149,18 @@ function Context({ thread, sameDeployment }: { thread: ThreadWithMessages; sameD
  * La file est figée à l'ouverture et au changement de filtre : un retour résolu y reste, seuls les nouveaux retours s'ajoutent à la fin. Elle couvre toute la revue, pas seulement cet écran.
  * « Résoudre et suivant » n'avance qu'après confirmation du service ; un échec s'affiche dans la conversation, qui reste sélectionnée.
  * Les brouillons de réponse vivent dans le client : changer de retour ne les perd pas.
+ * « Mes retours » (`own`, ouvert depuis la toolbar) : les fils écrits par la personne, toutes pages et tous états, le plus récemment actif d'abord ; la ligne dit la dernière réponse,
+ * « Suivant » passe au retour suivant sans rien changer, Résoudre ou Rouvrir restent secondaires.
  */
-export function TriageView({ review, start, status, shortcut, onClose, onShow }: {
-  review: Review; start: string | null; status: Status; shortcut: boolean; onClose: () => void; onShow: (threadId: string, hint: string) => void;
+export function TriageView({ review, start, own = false, status, shortcut, onClose, onShow }: {
+  review: Review; start: string | null; own?: boolean; status: Status; shortcut: boolean; onClose: () => void; onShow: (threadId: string, hint: string) => void;
 }) {
   const { client, threads } = review;
-  const idsOf = (filter: Filter) => threads.filter((t) => (filter === 'mine' ? forMe(review, t) : filter === 'agent' ? t.state === 'open' && handoffIn(review, t)?.state === 'pending' : filter === 'verify' ? toVerify(t) : t.state === filter)).map((t) => t.threadId);
+  const me = review.session?.actor.key ?? '';
+  const idsOf = (filter: Filter) => (filter === 'own' ? ownThreads(threads, me) : threads.filter((t) => (filter === 'mine' ? forMe(review, t) : filter === 'agent' ? t.state === 'open' && handoffIn(review, t)?.state === 'pending' : filter === 'verify' ? toVerify(t) : t.state === filter))).map((t) => t.threadId);
   const first = threads.find((t) => t.threadId === start);
-  const [filter, setFilter] = useState<Filter>(first?.state === 'resolved' ? 'resolved' : 'open');
+  const [filter, setFilter] = useState<Filter>(own ? 'own' : first?.state === 'resolved' ? 'resolved' : 'open');
+  const mine = filter === 'own';
   const [queue, setQueue] = useState(() => idsOf(filter));
   const [active, setActive] = useState<string | null>(first?.threadId ?? queue[0] ?? null);
   const [zoom, setZoom] = useState<'fit' | 'target'>('fit');
@@ -181,11 +201,11 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
     setActive(ids[0] ?? null);
   };
   const resolveNext = async () => {
-    if (!thread || !canResolve || resolving) return;
+    if (!thread || !(mine ? canChangeState(review, thread) : canResolve) || resolving) return;
     setResolving(true);
     const done = await changeState(review, thread);
     setResolving(false);
-    if (done) setPassed(thread.threadId);
+    if (done && !mine) setPassed(thread.threadId);
   };
 
   useEffect(() => {
@@ -218,7 +238,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
     else if (key === 'arrowup' || key === 'k') move(-1);
     else if (e.repeat) return;
     else if (key === 'r' && thread) replyRef.current?.focus();
-    else if (key === 'e' && thread) void resolveNext();
+    else if (key === 'e' && thread && !mine) void resolveNext();
     else return;
     e.preventDefault();
   };
@@ -230,10 +250,10 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
   }, []);
 
   return (
-    <div ref={rootRef} className="socrate-triage" role="region" aria-label="Traiter les retours" data-testid="socrate-triage" data-thread={active ?? undefined}>
+    <div ref={rootRef} className="socrate-triage" role="region" aria-label={mine ? 'Mes retours' : 'Traiter les retours'} data-testid="socrate-triage" data-thread={active ?? undefined}>
       <style>{TRIAGE_CSS}</style>
       <header className="socrate-triage-head">
-        <h1 ref={headingRef} tabIndex={-1}>Traiter les retours</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{mine ? 'Mes retours' : 'Traiter les retours'}</h1>
         <span className="socrate-meta" data-testid="socrate-triage-position">{thread ? `${index + 1}/${items.length}` : `${items.length}/${items.length}`}</span>
         <button type="button" className="socrate-icon" aria-label="Fermer" data-socrate-tip="Fermer · Échap" onClick={onClose}>{ICON.close}</button>
       </header>
@@ -246,7 +266,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
       <div className="socrate-triage-main" data-done={!thread || undefined}>
         <nav className="socrate-triage-queue" aria-label="File des retours">
           <div className="socrate-filter" role="group" aria-label="État">
-            {(['open', 'resolved', 'mine', 'agent', 'verify'] as const).filter((f) => f === 'open' || f === 'resolved' || f === filter || idsOf(f).length > 0).map((f) => (
+            {(['open', 'resolved', 'mine', 'agent', 'verify', 'own'] as const).filter((f) => f === 'open' || f === 'resolved' || f === filter || idsOf(f).length > 0).map((f) => (
               <button key={f} type="button" aria-pressed={filter === f} onClick={() => pick(f)}>{FILTER_NAMES[f]} <span className="socrate-count">{idsOf(f).length}</span></button>
             ))}
           </div>
@@ -256,7 +276,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
                 <button type="button" className="socrate-row" aria-current={t.threadId === active ? 'true' : undefined} onClick={() => setActive(t.threadId)}>
                   <Avatar actor={t.author} />
                   <span>
-                    <strong>{t.author.displayName}</strong>
+                    {mine ? <strong data-testid="socrate-triage-reply">{replyLine(t, me)}</strong> : <strong>{t.author.displayName}</strong>}
                     <span className="socrate-row-text">{excerptOf(t)}</span>
                     <span className="socrate-row-foot"><span className="socrate-tag">{t.state === 'open' ? 'Ouverte' : 'Résolue'}</span>{!t.target && <span className="socrate-tag">Général</span>}<HandoffTag review={review} thread={t} /></span>
                   </span>
@@ -293,11 +313,12 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
               <div className="socrate-triage-thread"><Conversation key={thread.threadId} thread={thread} review={review} inputRef={replyRef} /></div>
               <div className="socrate-triage-actions">
                 <div>
-                  {canResolve && <button type="button" className="socrate-button" data-testid="socrate-triage-resolve" aria-keyshortcuts={shortcut ? 'E' : undefined} aria-disabled={resolving} onClick={() => void resolveNext()}>Résoudre et suivant</button>}
-                  <button type="button" className="socrate-button secondary" data-testid="socrate-triage-next" aria-keyshortcuts={shortcut ? 'J ArrowDown' : undefined} onClick={() => move(1)}>Suivant</button>
-                  {page && sameOriginRoute(page) && <button type="button" className="socrate-button link" data-testid="socrate-triage-show" onClick={() => onShow(thread.threadId, openContainerHint(thread.target!) ?? 'L’élément n’est pas affiché sur cet écran pour le moment.')}>Voir dans la preview</button>}
+                  {canResolve && !mine && <button type="button" className="socrate-button" data-testid="socrate-triage-resolve" aria-keyshortcuts={shortcut ? 'E' : undefined} aria-disabled={resolving} onClick={() => void resolveNext()}>Résoudre et suivant</button>}
+                  <button type="button" className={`socrate-button${mine ? '' : ' secondary'}`} data-testid="socrate-triage-next" aria-keyshortcuts={shortcut ? 'J ArrowDown' : undefined} onClick={() => move(1)}>Suivant</button>
+                  {mine && canChangeState(review, thread) && <button type="button" className="socrate-button secondary" data-testid="socrate-triage-state" aria-disabled={resolving} onClick={() => void resolveNext()}>{thread.state === 'open' ? 'Résoudre' : 'Rouvrir'}</button>}
+                  {page && sameOriginRoute(page) && <button type="button" className="socrate-button link" data-testid="socrate-triage-show" onClick={() => onShow(thread.threadId, openContainerHint(thread.target!) ?? 'L’élément n’est pas affiché sur cet écran pour le moment.')}>Voir sur la page</button>}
                 </div>
-                <p className="socrate-meta socrate-triage-keys" style={{ margin: 0 }}>{shortcut ? 'J/K ou ↓/↑ naviguer · R répondre · E résoudre et suivant · Échap fermer' : 'Échap fermer'}</p>
+                <p className="socrate-meta socrate-triage-keys" style={{ margin: 0 }}>{shortcut ? `J/K ou ↓/↑ naviguer · R répondre${mine ? '' : ' · E résoudre et suivant'} · Échap fermer` : 'Échap fermer'}</p>
               </div>
             </aside>
           </>
@@ -307,7 +328,7 @@ export function TriageView({ review, start, status, shortcut, onClose, onShow }:
               {ICON.check}
               {left.length === 0 && filter === 'open' ? <h2>Tout est traité</h2> : <h2>Fin de la file</h2>}
               {left.length > 0 && <>
-                <p className="socrate-meta">{left.length} retour{left.length > 1 ? 's' : ''} encore {filter === 'resolved' ? `résolu${left.length > 1 ? 's' : ''}` : `ouvert${left.length > 1 ? 's' : ''}`}.</p>
+                {!mine && <p className="socrate-meta">{left.length} retour{left.length > 1 ? 's' : ''} encore {filter === 'resolved' ? `résolu${left.length > 1 ? 's' : ''}` : `ouvert${left.length > 1 ? 's' : ''}`}.</p>}
                 <button type="button" className="socrate-button secondary" onClick={() => setActive(left[0]!.threadId)}>Reprendre</button>
               </>}
               <button type="button" className="socrate-button link" onClick={() => pick(filter === 'open' ? 'resolved' : 'open')}>{filter === 'open' ? `Voir les résolus (${idsOf('resolved').length})` : `Voir les ouverts (${idsOf('open').length})`}</button>
