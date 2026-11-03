@@ -437,7 +437,8 @@ export function ConversationList({ review, title, status, route, located, expand
   const here = (t: ThreadWithMessages) => !t.target || screenOf(t.target) === route;
   const inState = (f: StateFilter) => (t: ThreadWithMessages) => f === 'all' || t.state === f;
   const scoped = scope === 'all' ? threads : threads.filter(here);
-  const shown = scoped.filter(inState(stateFilter));
+  // Le fil déplié (repli de « Voir sur la page ») reste affiché quels que soient la page et l'état choisis.
+  const shown = threads.filter((t) => t.threadId === expanded || (scoped.includes(t) && inState(stateFilter)(t)));
   const counts = { screen: threads.filter(here).filter(inState(stateFilter)).length, all: threads.filter(inState(stateFilter)).length };
   const stateCounts = { open: scoped.filter(inState('open')).length, resolved: scoped.filter(inState('resolved')).length, all: scoped.length };
   const lacksCapability = session !== null && !canParticipate;

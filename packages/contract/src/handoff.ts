@@ -54,5 +54,5 @@ export function replyTo<M extends HandoffMessage>(messages: readonly M[], actorK
 export function ownThreads<T extends OwnThread>(threads: readonly T[], actorKey: string): T[] {
   return threads.filter((t) => t.messages[0]?.author.key === actorKey).sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)) || a.threadId.localeCompare(b.threadId));
 }
-/** Badge de « Mes retours » : nombre de ses fils dont le dernier message est une réponse reçue. Dérivé à chaque lecture, sans stockage. */
-export const ownReplies = (threads: readonly OwnThread[], actorKey: string) => threads.filter((t) => t.messages[0]?.author.key === actorKey && replyTo(t.messages, actorKey)).length;
+/** Badge de « Mes retours » : nombre de ses fils ouverts dont le dernier message est une réponse reçue, ceux qui attendent sa réponse. Dérivé à chaque lecture, sans stockage. */
+export const ownReplies = (threads: ReadonlyArray<OwnThread & { state: string }>, actorKey: string) => threads.filter((t) => t.state === 'open' && t.messages[0]?.author.key === actorKey && replyTo(t.messages, actorKey)).length;

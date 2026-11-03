@@ -352,7 +352,8 @@ export function pageOf(t: Target): string | null {
   if (t.frame?.length) return screenOf(t);
   try {
     const u = new URL(t.url);
-    if (u.origin === location.origin) return u.pathname + u.search + u.hash;
+    const page = u.pathname + u.search + u.hash;
+    if (u.origin === location.origin && sameOriginRoute(page)) return page;
   } catch { /* URL illisible : la route suffit */ }
   return t.route;
 }
@@ -360,7 +361,7 @@ export function pageOf(t: Target): string | null {
 /** Route enregistrée navigable par l'adaptateur : chemin absolu de la même origine, jamais une adresse extérieure. */
 export function sameOriginRoute(route: string): boolean {
   try {
-    return route.startsWith('/') && new URL(route, location.origin).origin === location.origin;
+    return route.startsWith('/') && !route.startsWith('//') && new URL(route, location.origin).origin === location.origin;
   } catch {
     return false;
   }

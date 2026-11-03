@@ -502,7 +502,9 @@ export default function ReviewFrame({ preview, getIdentityAssertion, navigation,
     if (!t || !screen || !sameOriginRoute(screen)) return false;
     setMenu(null);
     setMissed(null);
-    const page = pageOf(t.target!)!;
+    const page = pageOf(t.target!);
+    // Valeur finale vérifiée : jamais une adresse protocolaire relative (`//hôte/…`) passée à l'adaptateur.
+    if (!page || !sameOriginRoute(page)) return false;
     if (page !== (t.target!.frame?.length ? location.pathname : location.pathname + location.search + location.hash)) navigation.go(page);
     const alive = { get alive() { return owner.current === client; } };
     const r = await afterNavigation(alive, () => {

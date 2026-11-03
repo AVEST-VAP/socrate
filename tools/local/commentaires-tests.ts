@@ -3314,6 +3314,67 @@ test('mes retours : bouton et badge de réponses, vue toutes pages et tous état
   }
 });
 
+test('mes retours, repli et course : fil ciblé résolu dans une modale fermée gardé visible malgré les filtres ; résolution en vol puis passage à « Mes retours » sans avancer la sélection', async () => {
+  const claire = await browser.newContext(origins());
+  const karim = await browser.newContext(origins());
+  try {
+    const page = await loginAs(claire, 'Claire Morel, relectrice produit', '/reglages/rappels');
+    await toolbarReady(page);
+    await page.getByTestId('open-courte').click();
+    const body = 'Repli : retour résolu dans la modale fermée.';
+    const id = await comment(page, page.getByTestId('scene-intro'), body);
+    await page.getByTestId('scene-dialog').getByRole('button', { name: 'Fermer' }).click();
+    await page.getByTestId('scene-dialog').waitFor({ state: 'hidden' });
+
+    // Résolu depuis « Mes retours », puis « Voir sur la page » : cible absente, liste sur « Cet écran » et « Ouvertes ».
+    await control(page, 'own').click();
+    const triage = list(page).getByTestId('socrate-triage');
+    await triage.locator(`[data-testid="socrate-triage-row"][data-thread="${id}"] button`).click();
+    await list(page).locator(`[data-testid="socrate-triage"][data-thread="${id}"]`).waitFor();
+    await triage.getByTestId('socrate-triage-state').click();
+    await triage.getByTestId('socrate-triage-state').getByText('Rouvrir').waitFor({ timeout: 10_000 });
+    assert.equal((await threadOf(body))!.state, 'resolved');
+    await triage.getByTestId('socrate-triage-show').click();
+    await triage.waitFor({ state: 'detached' });
+    await row(page, id).locator('[data-testid="socrate-conversation"]').waitFor({ timeout: 10_000 });
+    assert.equal(await list(page).getByRole('button', { name: /^Ouvertes/ }).getAttribute('aria-pressed'), 'true', 'filtre d’état inchangé');
+    assert.equal(await row(page, id).getAttribute('data-state'), 'resolved', 'fil résolu affiché malgré « Ouvertes »');
+    await page.getByTestId('socrate-note').getByText('C’était dans la fenêtre « Modèle de rappel court ». Ouvrez-la pour retrouver l’élément.').waitFor();
+    await shot(page, 'mes-retours-repli-resolu');
+
+    // Course : Karim lance « Résoudre et suivant », passe à « Mes retours » avant la confirmation ; la sélection ne bouge pas.
+    const dev = await loginAs(karim, 'Karim Benali, développeur', '/reglages/rappels');
+    await toolbarReady(dev);
+    await control(dev, 'launcher').click();
+    await list(dev).getByRole('textbox', { name: 'Votre commentaire global' }).fill('Course : retour de Karim.');
+    await send(dev);
+    await list(dev).locator('[data-testid="socrate-row"]', { hasText: 'Course : retour de Karim.' }).waitFor();
+    const mine = (await threadOf('Course : retour de Karim.'))!.thread_id;
+    await list(dev).getByTestId('socrate-triage-open').click();
+    const view = list(dev).getByTestId('socrate-triage');
+    await view.waitFor();
+    const first = (await view.getAttribute('data-thread'))!;
+    let release!: () => void;
+    const held = new Promise<void>((ok) => { release = ok; });
+    karim.setFaults((r) => (r.method === 'PUT' && path(r).endsWith('/state') ? { kind: 'hold-response', until: held } : { kind: 'pass' }));
+    await view.getByTestId('socrate-triage-resolve').click();
+    await view.getByRole('button', { name: /^Mes retours/ }).click();
+    await list(dev).locator(`[data-testid="socrate-triage"][data-thread="${mine}"]`).waitFor();
+    release();
+    for (let i = 0; i < 50 && (await db().prepare('SELECT state FROM threads WHERE thread_id = ?').bind(first).first<{ state: string }>())!.state !== 'resolved'; i++) await dev.waitForTimeout(100);
+    await view.getByTestId('socrate-triage-state').getByText('Résoudre').waitFor();
+    await dev.waitForTimeout(500);
+    karim.setFaults(null);
+    assert.equal((await db().prepare('SELECT state FROM threads WHERE thread_id = ?').bind(first).first<{ state: string }>())!.state, 'resolved', 'résolution confirmée');
+    assert.equal(await view.getAttribute('data-thread'), mine, 'sélection de « Mes retours » inchangée');
+    assert.deepEqual(claire.blocked, []);
+    assert.deepEqual(karim.blocked, []);
+  } finally {
+    await claire.context.close();
+    await karim.context.close();
+  }
+});
+
 test('nouveau déploiement sans identifiant éditorial : un seul candidat de même rôle au même début de texte devient une position probable ; deux candidats ou un autre rôle, aucune pastille', async () => {
   const ctx = await browser.newContext(origins());
   try {

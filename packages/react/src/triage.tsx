@@ -200,12 +200,16 @@ export function TriageView({ review, start, own = false, status, shortcut, onClo
     setQueue(ids);
     setActive(ids[0] ?? null);
   };
+  // Filtre affiché à la confirmation : une résolution lancée dans une file n'avance pas la sélection d'une autre (« Mes retours » n'avance jamais).
+  const shownFilter = useRef(filter);
+  shownFilter.current = filter;
   const resolveNext = async () => {
     if (!thread || !(mine ? canChangeState(review, thread) : canResolve) || resolving) return;
+    const from = filter;
     setResolving(true);
     const done = await changeState(review, thread);
     setResolving(false);
-    if (done && !mine) setPassed(thread.threadId);
+    if (done && from !== 'own' && shownFilter.current === from) setPassed(thread.threadId);
   };
 
   useEffect(() => {
