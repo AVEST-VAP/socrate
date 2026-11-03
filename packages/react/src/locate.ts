@@ -344,10 +344,24 @@ export async function afterNavigation<R extends { kind: string }>(cycle: { reado
 /** Écran d'une cible : la route de l'hôte pour une iframe, sinon la route du document ; inconnu pour une charge d'iframe antérieure sans route de l'hôte. */
 export const screenOf = (t: Target): string | null => (t.frame?.length ? t.hostRoute ?? null : t.route);
 
+/**
+ * Adresse rejouée par « Voir sur la page » : chemin, requête et fragment de l'URL enregistrée pour une cible du document principal, qui rouvrent une modale pilotée par l'URL (`?modal=…`) ;
+ * route de l'hôte pour une iframe ; route seule si l'URL est d'une autre origine ou illisible. La localisation compare toujours les chemins.
+ */
+export function pageOf(t: Target): string | null {
+  if (t.frame?.length) return screenOf(t);
+  try {
+    const u = new URL(t.url);
+    const page = u.pathname + u.search + u.hash;
+    if (u.origin === location.origin && sameOriginRoute(page)) return page;
+  } catch { /* URL illisible : la route suffit */ }
+  return t.route;
+}
+
 /** Route enregistrée navigable par l'adaptateur : chemin absolu de la même origine, jamais une adresse extérieure. */
 export function sameOriginRoute(route: string): boolean {
   try {
-    return route.startsWith('/') && new URL(route, location.origin).origin === location.origin;
+    return route.startsWith('/') && !route.startsWith('//') && new URL(route, location.origin).origin === location.origin;
   } catch {
     return false;
   }

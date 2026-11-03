@@ -1,5 +1,5 @@
 import { Suspense, createContext, lazy, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { handoffOf, waitsFor, type Actor, type Message, type Revision, type Session, type ThreadWithMessages } from '@socrate/contract';
+import { handoffOf, lastActivity, waitsFor, type Actor, type Message, type Revision, type Session, type ThreadWithMessages } from '@socrate/contract';
 import type { CaptureStatus } from './capture.ts';
 import { describeOwner, isStaleTargeted, describePayload, slotId, type DraftAttachment, type Labels, type Owner, type ReviewClient, type Slot, type Submission, type SubmissionView } from './client.ts';
 import { colorOf, initialsOf, relativeDate } from './layout.ts';
@@ -99,6 +99,7 @@ export const ICON = {
   check: svg(<path d="M20 6 9 17l-5-5" />),
   reopen: svg(<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></>),
   close: svg(<path d="M18 6 6 18M6 6l12 12" />),
+  inbox: svg(<><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></>),
   attach: svg(<path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" />),
 };
 const MEDIA_LIMITS = 'images ≤10 Mio, MP4 ou WebM ≤50 Mio, sinon vidéos ≤15 min';
@@ -415,14 +416,14 @@ type StateFilter = 'open' | 'resolved' | 'all';
 const STATE_NAMES: Record<StateFilter, string> = { open: 'Ouvertes', resolved: 'Résolues', all: 'Toutes' };
 
 /**
- * Liste peu dense : auteur, date, deux lignes, réponses. Par défaut, fils ouverts de cet écran ; la route enregistrée décide de l'écran, pas la localisation.
+ * Liste peu dense : auteur, date de la dernière activité, deux lignes, réponses. Par défaut, fils ouverts de cet écran ; la route enregistrée décide de l'écran, pas la localisation.
  * Les commentaires généraux portent sur la revue : présents dans les deux portées. Une ligne ouvre son fil en place, localisé ou non ;
  * « Voir sur la page » ou « Aller à la page » retrouve sa cible séparément ; une cible absente de cet écran s'ouvre dans la vue de traitement, comme toute la file.
  */
-export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onTriage, onClose, headingRef, generalRef }: {
+export function ConversationList({ review, title, status, route, located, expanded, onOpen, onGoto, onTriage, onClose, headingRef, generalRef, missed }: {
   review: Review; title: string | null; status: Status; route: string; located: Map<string, boolean | undefined>; expanded: string | null;
   onOpen: (threadId: string) => void; onGoto: (threadId: string) => void; onTriage: (threadId: string | null) => void; onClose: () => void;
-  headingRef: RefObject<HTMLHeadingElement | null>; generalRef: RefObject<HTMLTextAreaElement | null>;
+  headingRef: RefObject<HTMLHeadingElement | null>; generalRef: RefObject<HTMLTextAreaElement | null>; missed: { threadId: string; hint: string } | null;
 }) {
   const { client, session, seen, threads, refresh, canParticipate } = review;
   const [scope, setScope] = useState<Scope>('screen');
@@ -436,7 +437,8 @@ export function ConversationList({ review, title, status, route, located, expand
   const here = (t: ThreadWithMessages) => !t.target || screenOf(t.target) === route;
   const inState = (f: StateFilter) => (t: ThreadWithMessages) => f === 'all' || t.state === f;
   const scoped = scope === 'all' ? threads : threads.filter(here);
-  const shown = scoped.filter(inState(stateFilter));
+  // Le fil déplié (repli de « Voir sur la page ») reste affiché quels que soient la page et l'état choisis.
+  const shown = threads.filter((t) => t.threadId === expanded || (scoped.includes(t) && inState(stateFilter)(t)));
   const counts = { screen: threads.filter(here).filter(inState(stateFilter)).length, all: threads.filter(inState(stateFilter)).length };
   const stateCounts = { open: scoped.filter(inState('open')).length, resolved: scoped.filter(inState('resolved')).length, all: scoped.length };
   const lacksCapability = session !== null && !canParticipate;
@@ -523,7 +525,7 @@ export function ConversationList({ review, title, status, route, located, expand
                     <Avatar actor={t.author} />
                     <span>
                       <strong>{t.author.displayName}</strong>
-                      <When iso={t.createdAt} />
+                      <When iso={lastActivity(t)} />
                       <span className="socrate-row-text">{excerptOf(t)}</span>
                       <span className="socrate-row-foot">
                         {replies && <span className="socrate-replies">{replies}</span>}
@@ -531,7 +533,7 @@ export function ConversationList({ review, title, status, route, located, expand
                         {t.state === 'resolved' && <span className="socrate-tag">Résolue</span>}
                         <HandoffTag review={review} thread={t} />
                         {!t.target ? <span className="socrate-tag">Général</span>
-                          : !onScreen && <span data-testid="socrate-elsewhere">{page ? `Autre page · ${page}` : 'Écran inconnu'}</span>}
+                          : !onScreen && <span data-testid="socrate-elsewhere">{page ? `Autre page · ${page}` : 'Page inconnue'}</span>}
                       </span>
                     </span>
                   </button>
@@ -542,6 +544,7 @@ export function ConversationList({ review, title, status, route, located, expand
                   : located.has(t.threadId) ? <span className="socrate-goto socrate-meta" data-testid="socrate-located"><button type="button" className="socrate-button link" onClick={() => onGoto(t.threadId)}>Voir sur la page</button>{located.get(t.threadId) && ' · position probable'}</span>
                   : <button type="button" className="socrate-button link socrate-goto" data-testid="socrate-missing" onClick={() => onTriage(t.threadId)}>Traiter ce retour</button>}
                 {!open && <RowState thread={t} review={review} />}
+                {open && missed?.threadId === t.threadId && <p className="socrate-meta socrate-goto" role="status" data-testid="socrate-goto-hint">{missed.hint}</p>}
                 {open && <div className="socrate-inline"><Conversation thread={t} review={review} /></div>}
               </li>
             );

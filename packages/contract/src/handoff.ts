@@ -41,3 +41,18 @@ export function waitsFor(messages: readonly HandoffMessage[], actor: { key: stri
   }
   return false;
 }
+
+type OwnThread = { threadId: string; createdAt: string; updatedAt: string; messages: ReadonlyArray<HandoffMessage & { createdAt: string }> };
+/** Dernière activité d'un fil : message, ou changement d'état sans message (la résolution depuis le navigateur n'en écrit pas). */
+export const lastActivity = (t: OwnThread) => [t.updatedAt, t.messages.at(-1)?.createdAt ?? t.createdAt].reduce((a, b) => (a > b ? a : b));
+/** Réponse reçue : le dernier message vient d'une autre personne ou d'un agent, celui de cette personne compris, résolution par message comprise ; sinon `null`. Aucun état lu ou non lu. */
+export function replyTo<M extends HandoffMessage>(messages: readonly M[], actorKey: string): M | null {
+  const m = messages.at(-1);
+  return m && (m.author.key !== actorKey || m.via) ? m : null;
+}
+/** Fils écrits par cette personne (autrice du premier message), toutes pages et tous états, le plus récemment actif d'abord. */
+export function ownThreads<T extends OwnThread>(threads: readonly T[], actorKey: string): T[] {
+  return threads.filter((t) => t.messages[0]?.author.key === actorKey).sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)) || a.threadId.localeCompare(b.threadId));
+}
+/** Badge de « Mes retours » : nombre de ses fils ouverts dont le dernier message est une réponse reçue, ceux qui attendent sa réponse. Dérivé à chaque lecture, sans stockage. */
+export const ownReplies = (threads: ReadonlyArray<OwnThread & { state: string }>, actorKey: string) => threads.filter((t) => t.state === 'open' && t.messages[0]?.author.key === actorKey && replyTo(t.messages, actorKey)).length;

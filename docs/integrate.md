@@ -112,7 +112,7 @@ The client takes three inputs:
 - `preview`: `{ serviceUrl, projectId, reviewKey, deploymentId }`, injected at build time or served by your backend;
 - `agentLogos` (optional): logo address by lowercase agent name, for example `{ claude: '/logos/claude.svg' }`. Without an entry, messages from that agent show a neutral monogram. Socrate ships no third-party logo.
 - `getIdentityAssertion(signal)`: calls your route from step 1 and returns the JWT string; `signal` is aborted when the client unmounts;
-- `navigation`: `{ current(): string, go(route: string): void }`, wired to your router. Socrate uses it to know which screen a comment belongs to and to open the page of a thread.
+- `navigation`: `{ current(): string, go(route: string): void }`, wired to your router. Socrate uses it to know which screen a comment belongs to and to open the page of a thread. `go` may receive a query and a hash (`/settings?modal=reminder#top`) when the thread was written on such an address.
 
 With React 19, render `SocrateReview` from `@meyer0x/socrate/react` as in the quick start. Its `preview` prop also takes the `origin` of the build: on any other origin, or inside an iframe, the component renders nothing. The `key` remounts the client when the user or the impersonated account changes in the same tab.
 

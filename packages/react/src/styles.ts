@@ -134,6 +134,7 @@ export const HOST_CSS = `
 [data-socrate="toolbar"] [data-hint]{padding:0 8px 0 6px;color:#71717a}
 [data-socrate="toolbar"][data-narrow] [data-hint],[data-socrate="toolbar"][data-narrow] [data-sep]{display:none}
 [data-socrate="toolbar"][data-narrow] [data-socrate-action="draft"]{padding:0 8px}
+[data-socrate="toolbar"][data-narrow]:has([data-socrate-action="draft"]) [data-socrate-action="own"]{display:none}
 @media (pointer:coarse){[data-socrate="toolbar"]{height:52px}[data-socrate="toolbar"] button{height:42px;min-width:42px}}
 [data-socrate="menu"]{all:initial;position:fixed;z-index:2147483003;display:grid;min-width:200px;padding:4px;border-radius:10px;background:#fff;color:#09090b;border:1px solid #e4e4e7;box-shadow:0 10px 24px -6px rgb(0 0 0/.16),0 2px 4px rgb(0 0 0/.04);font:13px/18px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 [data-socrate="menu"] button{justify-content:flex-start;gap:8px;border-radius:6px;padding:0 8px;min-height:32px;height:auto}

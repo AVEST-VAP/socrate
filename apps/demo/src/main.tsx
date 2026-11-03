@@ -2,7 +2,7 @@ import { Component, StrictMode, Suspense, lazy, useEffect, useState, useSyncExte
 import { createRoot } from 'react-dom/client';
 import type { NavigationAdapter } from '@socrate/react';
 import { login, logout, me, type Me } from './host-api.ts';
-import { RappelModal } from './scene-modal.tsx';
+import { ApercuModal, RappelModal } from './scene-modal.tsx';
 
 // Une seule revue par onglet : l'application ouverte dans la vue scindée ne monte pas Socrate.
 const SocrateEntry = __SOCRATE_PREVIEW__ && window === window.top ? lazy(() => import('./socrate.tsx')) : null;
@@ -29,7 +29,9 @@ const navigation: NavigationAdapter = {
   },
 };
 window.addEventListener('popstate', () => listeners.forEach((l) => l()));
-const useRoute = () => useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => window.location.pathname);
+const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+const useRoute = () => useSyncExternalStore(subscribe, () => window.location.pathname);
+const useModal = () => useSyncExternalStore(subscribe, () => new URLSearchParams(window.location.search).get('modal'));
 
 function Link({ to, children }: { to: string; children: React.ReactNode }) {
   return <a href={to} onClick={(e) => { e.preventDefault(); navigation.go(to); }}>{children}</a>;
@@ -57,6 +59,11 @@ function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   );
 }
 
+function Apercu() {
+  const open = useModal() === 'apercu';
+  return <ApercuModal open={open} onOpen={() => navigation.go('/reglages/rappels?modal=apercu')} onClose={() => navigation.go('/reglages/rappels')} />;
+}
+
 function Settings({ route }: { route: string }) {
   const [delay, setDelay] = useState('24');
   return (
@@ -72,6 +79,7 @@ function Settings({ route }: { route: string }) {
             <label {...(__SOCRATE_PREVIEW__ && { 'data-socrate-id': 'rappel-delai' })}>Délai de rappel avant le rendez-vous (heures) <input value={delay} onChange={(e) => setDelay(e.target.value)} /></label>
             <p {...(__SOCRATE_PREVIEW__ && { 'data-socrate-id': 'rappel-libelle' })}>Libellé affiché au client : « Rappel automatique ».</p>
             <RappelModal />
+            <Apercu />
           </article>
         ) : (
           <article><h1>Général</h1><p>Nom du cabinet, horaires, fuseau.</p></article>

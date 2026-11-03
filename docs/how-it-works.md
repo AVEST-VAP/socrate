@@ -92,8 +92,25 @@ Each submission (comment, reply, state change) is an intention with an idempoten
 - **Capture.** The whole capture with the target framed; "Cible" or a click on the image crops around the target, "Ajuster" comes back. A general comment or a thread without capture gets a card without image. Only the active thread's image and its two neighbours are loaded, and bitmaps are released as they leave that window.
 - **Conversation.** The usual conversation, with its rights: reply, resolve and reopen follow the same rules as elsewhere. Reply drafts live in the client, so they survive moving between threads.
 - **Resolve and next.** "Résoudre et suivant" moves on only once the service confirmed the resolution. On failure the thread stays selected and shows the error. After the last thread: "Tout est traité", or "Fin de la file" with the number of threads skipped.
-- **Back to the app.** "Voir dans la preview" closes the view and goes to the recorded route. If the target is not found, Socrate says which window to open; its pin returns once the element is displayed.
+- **Back to the app.** "Voir sur la page" closes the view and goes to the recorded page (see [Going back to a target](#going-back-to-a-target)). If the target is not found, Socrate says which window to open; its pin returns once the element is displayed.
 - **Keyboard.** `J`/`K` or `↓`/`↑`, `R` to reply, `E` to resolve and move on, `Échap` to close. They follow the C shortcut setting and do nothing while typing; `Échap` always works, and in a field it first leaves the field.
+
+### Own feedback
+
+A reviewer comes back the next day to read the answers to their feedback, often written inside dialogs and drawers. See [ADR 0014](adr/0014-own-feedback.md).
+
+- **Toolbar.** "Mes retours" appears once the signed-in person wrote the first message of at least one thread. Its badge counts their open threads whose last message is not theirs, the ones waiting for their answer: a reply from a person or an agent (their own agent included). Resolved threads leave the count. It is derived from the threads at each read (`ownThreads`, `ownReplies` and `replyTo` in `@socrate/contract`); nothing is stored and nothing is marked as read. Replying lowers the count; reading does not.
+- **View.** The button opens the triage view on the "Mes retours" filter: the person's threads on every page and in every state, most recently active first (last message or last state change). Each line says the latest answer ("Réponse de Karim Benali · hier 17 h", "Résolu par Claude · …", "Résolu · …" for a resolution without message, whose author is not recorded) or "En attente de réponse". The main action is "Suivant"; "Résoudre" or "Rouvrir" stay secondary and do not move on, and `E` does nothing. Capture, framed target and container hint are those of the triage view. `Échap` closes the view, and the list if it was closed.
+- **List.** A line shows the date of the thread's last activity, not its creation.
+
+### Going back to a target
+
+"Voir sur la page" and "Aller à la page" navigate the host only through its `navigation.go` adapter, same origin only, and never replay a click.
+
+- **Main document.** For a target of the main document (empty or absent frame path), Socrate goes to the pathname, query and hash of the recorded `target.url` when it has the preview's origin, otherwise to the route. A host dialog driven by the URL (`?modal=…`) therefore opens again. A value that is not a same-origin absolute path, such as `//host/…`, is never passed to `go`. The page counts as already displayed only when the full URL matches. Your `go` adapter must accept a query and a hash.
+- **Iframe.** A target inside a same-origin iframe goes to the recorded host route.
+- **Matching.** Pins, "Cet écran" and relocation keep comparing pathnames.
+- **Not found.** The thread opens in the list and stays shown whatever the page and state filters. When the target was in a dialog or panel, the open thread says which one to open ("C’était dans la fenêtre « … ». Ouvrez-la pour retrouver l’élément.").
 
 - Messages can also carry up to four attachments: PNG, JPEG or WebP images up to 10 MiB, MP4 or WebM videos up to 50 MiB. Screen recordings in other formats are converted in the browser when possible.
 

@@ -60,3 +60,22 @@ export function RappelModal() {
     </section>
   );
 }
+
+/** Modale pilotée par l'URL (`?modal=apercu`), comme beaucoup d'hôtes : l'adresse seule la rouvre. */
+export function ApercuModal({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }) {
+  return (
+    <p>
+      <button type="button" data-testid="open-apercu" onClick={onOpen}>Aperçu du rappel</button>
+      <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+        <Dialog.Portal>
+          <Dialog.Backdrop style={S.backdrop} />
+          <Dialog.Popup style={{ ...S.popup, width: 420 }} data-testid="apercu-dialog">
+            <Dialog.Title>Aperçu du rappel</Dialog.Title>
+            <p data-testid="apercu-texte">Bonjour, votre rendez-vous fictif est demain à 14 h 30.</p>
+            <Dialog.Close>Fermer</Dialog.Close>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </p>
+  );
+}
