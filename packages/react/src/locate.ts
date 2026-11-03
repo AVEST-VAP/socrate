@@ -273,19 +273,8 @@ function byText(doc: Document, t: Target): Element | null {
   return hit && hit.getClientRects().length > 0 && hit.checkVisibility({ visibilityProperty: true }) ? hit : null;
 }
 
-/**
- * Cible d'une pastille après navigation, remontage ou rechargement, sans élément vivant retenu :
- * même route et même cadre ; identifiant éditorial propre et unique ; sinon, sur le même déploiement seulement :
- * avec un contexte enregistré, un seul candidat de même structure au même chemin sous un ancêtre identique, sans repli ;
- * sans contexte (retour antérieur ou cible non distinguée), la règle historique, puis un seul candidat dont la sérialisation complète
- * égale l'extrait enregistré et que le sélecteur d'origine désigne encore : un jumeau ne reprend pas la pastille d'une cible supprimée.
- * Sur un autre déploiement, sans identifiant éditorial : un seul élément de même balise et même rôle dont le texte propre commence par le texte propre
- * entier de l'extrait enregistré (`byText`), rendu et rendu `probable` ; le sélecteur positionnel d'un autre build ne désigne plus rien de sûr.
- * Une cible issue d'une sélection (`selection`, fil portant une proposition) ou sans texte propre n'est jamais relocalisée ainsi.
- * L'appelant ne garde pas une position probable d'une mutation à l'autre : il la redemande, et un jumeau apparu la retire.
- * Tout autre cas rend null : aucune pastille n'est posée sur un élément arbitraire.
- */
-export function findTarget(t: Target, sameDeployment: boolean, selection = false): Spot | null {
+/** Document de la cible sur cet écran : l'onglet, ou l'iframe unique de même origine désignée par le chemin de frame, sur la route enregistrée ; sinon null. */
+export function docOf(t: Target): { doc: Document; frame: HTMLIFrameElement | null } | null {
   let frame: HTMLIFrameElement | null = null;
   let doc = document;
   if (t.frame?.length) {
@@ -300,7 +289,25 @@ export function findTarget(t: Target, sameDeployment: boolean, selection = false
       return null;
     }
   }
-  if (doc.defaultView?.location.pathname !== t.route) return null;
+  return doc.defaultView?.location.pathname === t.route ? { doc, frame } : null;
+}
+
+/**
+ * Cible d'une pastille après navigation, remontage ou rechargement, sans élément vivant retenu :
+ * même route et même cadre ; identifiant éditorial propre et unique ; sinon, sur le même déploiement seulement :
+ * avec un contexte enregistré, un seul candidat de même structure au même chemin sous un ancêtre identique, sans repli ;
+ * sans contexte (retour antérieur ou cible non distinguée), la règle historique, puis un seul candidat dont la sérialisation complète
+ * égale l'extrait enregistré et que le sélecteur d'origine désigne encore : un jumeau ne reprend pas la pastille d'une cible supprimée.
+ * Sur un autre déploiement, sans identifiant éditorial : un seul élément de même balise et même rôle dont le texte propre commence par le texte propre
+ * entier de l'extrait enregistré (`byText`), rendu et rendu `probable` ; le sélecteur positionnel d'un autre build ne désigne plus rien de sûr.
+ * Une cible issue d'une sélection (`selection`, fil portant une proposition) ou sans texte propre n'est jamais relocalisée ainsi.
+ * L'appelant ne garde pas une position probable d'une mutation à l'autre : il la redemande, et un jumeau apparu la retire.
+ * Tout autre cas rend null : aucune pastille n'est posée sur un élément arbitraire.
+ */
+export function findTarget(t: Target, sameDeployment: boolean, selection = false): Spot | null {
+  const at = docOf(t);
+  if (!at) return null;
+  const { doc, frame } = at;
   const own = OWN_EDITORIAL.exec(t.selector);
   if (own) {
     const r = resolveEditorial(doc, own[2] ? { id: own[1]!, instance: own[2] } : { id: own[1]! });

@@ -140,6 +140,7 @@ Socrate must only ship in preview builds. With the package, everything behind `i
 
 - `data-socrate-id="<id>"` on an element lets the manifest point zones and markers at it.
 - `data-socrate-wording="<wording-id>"` on the element that displays exactly one prepared wording attaches proposals made on it to that wording. Never put it on a container that displays several texts.
+- `data-socrate-opener="<key>"` on the control that opens a dialog or drawer driven by local state lets "Voir sur la page" reopen it: when a thread's target was in that container and is missing, Socrate clicks the control carrying the recorded key, waits for the target and opens the thread. The key is letters, digits, `.`, `_`, `:` and `-`, at most 128 characters, stable across deployments and unique on the page, for example `visit:<id>` for the drawer of one visit. By adding it you commit that a click on this control only opens: it is idempotent and changes no data (no save, no toggle that closes, no request with side effects). Without the attribute, Socrate never clicks: it frames the control that opened the container and asks the reviewer to open it ([ADR 0015](adr/0015-container-opener.md)).
 
 Keep them behind the same flag (`{...(import.meta.env.SOCRATE && { 'data-socrate-id': 'settings' })}`) so that production markup does not carry them.
 

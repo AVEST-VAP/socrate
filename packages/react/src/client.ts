@@ -526,11 +526,19 @@ export class ReviewClient {
     }
     const pieces = p.attachments.length ? { attachments: p.attachments.map((a) => a.meta) } : {};
     const reserve = (target: Target) => this.transport('POST', `${this.base()}/targeted`, { kind: 'targeted', body: messageOf(p), target, image: p.image, ...(p.proposal && { proposal: p.proposal }), ...pieces }, { ...auth, 'Idempotency-Key': intent.key });
-    let reserved = await reserve(p.target);
-    // Service antérieur au champ `container`, ou relevé refusé : la même charge sans lui, refusée avant toute écriture, donc sans conflit de clé.
-    if (reserved.status === 422 && ((await reserved.clone().json().catch(() => null)) as ApiError | null)?.issues?.every((i) => i.path.startsWith('target.container'))) {
-      const { container: _, ...target } = p.target;
-      reserved = await reserve(target);
+    // Refus de validation portant seulement sur `under` : refusé avant toute écriture, la même clé reprend la charge allégée sans conflit.
+    const refused = async (r: Response, under: string) => r.status === 422 && !!((await r.clone().json().catch(() => null)) as ApiError | null)?.issues?.every((i) => i.path.startsWith(under));
+    let target = p.target;
+    let reserved = await reserve(target);
+    // Service antérieur au déclencheur (`container.opener`) : la fenêtre et son libellé sont gardés, seul le déclencheur est retiré.
+    if (target.container?.opener && await refused(reserved, 'target.container.opener')) {
+      const { opener: _, ...container } = target.container;
+      reserved = await reserve(target = { ...target, container });
+    }
+    // Service antérieur au champ `container`, ou relevé refusé : la même charge sans lui.
+    if (target.container && await refused(reserved, 'target.container')) {
+      const { container: _, ...rest } = target;
+      reserved = await reserve(rest);
     }
     if (reserved.status !== 201) return reserved;
     const r = (await reserved.json()) as Reservation;
